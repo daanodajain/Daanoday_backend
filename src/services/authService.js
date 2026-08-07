@@ -2,58 +2,48 @@ const bcrypt = require('bcryptjs');
 const db = require('../config/db');
 const { generateToken, generateRefreshToken } = require('../utils/jwt');
 
-const generateOtp = () => Math.floor(100000 + Math.random() * 900000).toString();
+// Login with email OR mobile + password
+const login = async ({ identifier, password }) => {
+  if (!identifier || !password) throw new Error('CREDENTIALS_REQUIRED');
 
-const sendOtp = async (mobile) => {
-  const [[user]] = await db.query('SELECT id, account_locked_until, first_login FROM users WHERE mobile = ?', [mobile]);
-  if (!user) throw new Error('USER_NOT_FOUND');
-
-  if (user.account_locked_until && new Date(user.account_locked_until) > new Date())
-    throw new Error('ACCOUNT_LOCKED');
-
-  const otp = generateOtp();
-  const expiry = new Date(Date.now() + 5 * 60 * 1000);
-  await db.query('UPDATE users SET otp_code = ?, otp_expires_at = ? WHERE id = ?', [otp, expiry, user.id]);
-
-  // In production: send via SMS. Dev: return in response.
-  return { firstLogin: !!user.first_login, otp };
-};
-
-const login = async ({ mobile, password, otp, newPassword }) => {
-  const [[user]] = await db.query('SELECT * FROM users WHERE mobile = ?', [mobile]);
+  // Find user by email or mobile
+  const [[user]] = await db.query(
+    'SELECT * FROM users WHERE email = ? OR mobile = ?',
+    [identifier, identifier]
+  );
   if (!user) throw new Error('USER_NOT_FOUND');
   if (!user.active) throw new Error('ACCOUNT_INACTIVE');
 
   if (user.account_locked_until && new Date(user.account_locked_until) > new Date())
     throw new Error('ACCOUNT_LOCKED');
 
-  // First login: OTP + set new password
-  if (user.first_login) {
-    if (!otp) throw new Error('OTP_REQUIRED');
-    if (user.otp_code !== otp || new Date(user.otp_expires_at) < new Date()) {
-      await _incrementFailedAttempts(user);
-      throw new Error('INVALID_OTP');
-    }
-    if (!newPassword) throw new Error('NEW_PASSWORD_REQUIRED');
-    const hash = await bcrypt.hash(newPassword, 10);
-    await db.query(
-      'UPDATE users SET password_hash = ?, first_login = FALSE, failed_login_attempts = 0, otp_code = NULL, otp_expires_at = NULL WHERE id = ?',
-      [hash, user.id]
-    );
-    return _buildLoginResponse({ ...user, first_login: false });
-  }
-
-  // Regular login
-  if (!password) throw new Error('PASSWORD_REQUIRED');
-  const valid = user.password_hash && (
-    password === user.password_hash ||          // plain-text dev fallback
-    await bcrypt.compare(password, user.password_hash)
-  );
+  // Verify password
+  const valid = user.password_hash && await bcrypt.compare(password, user.password_hash);
   if (!valid) {
     await _incrementFailedAttempts(user);
     throw new Error('INVALID_PASSWORD');
   }
+
   await db.query('UPDATE users SET failed_login_attempts = 0 WHERE id = ?', [user.id]);
+
+  const response = await _buildLoginResponse(user);
+
+  // If first_login — signal frontend to show change password
+  if (user.first_login) {
+    return { ...response, requirePasswordChange: true };
+  }
+
+  return response;
+};
+
+// Change password (first login or user-initiated)
+const changePassword = async (userId, newPassword) => {
+  const hash = await bcrypt.hash(newPassword, 10);
+  await db.query(
+    'UPDATE users SET password_hash = ?, first_login = FALSE, failed_login_attempts = 0 WHERE id = ?',
+    [hash, userId]
+  );
+  const [[user]] = await db.query('SELECT * FROM users WHERE id = ?', [userId]);
   return _buildLoginResponse(user);
 };
 
@@ -77,15 +67,13 @@ const _buildLoginResponse = async (user) => {
   );
 
   const roles = await Promise.all(roleRows.map(async (role) => {
-    const storeId = role.store_id;
-    // For SUPER_ADMIN (store_id NULL), load all permissions
     const [perms] = await db.query(
       `SELECT p.resource, p.action FROM permissions p
        JOIN role_permissions rp ON rp.permission_id = p.id
        WHERE rp.role_id = ?`,
       [role.id]
     );
-    return { name: role.name, store_id: storeId, store_name: role.store_name, permissions: perms };
+    return { name: role.name, store_id: role.store_id, store_name: role.store_name, permissions: perms };
   }));
 
   const storeIds = [...new Set(roleRows.map(r => r.store_id).filter(Boolean))];
@@ -94,11 +82,11 @@ const _buildLoginResponse = async (user) => {
     : [];
 
   return {
-    user: { id: user.id, name: user.name, mobile: user.mobile },
+    user: { id: user.id, name: user.name, email: user.email, mobile: user.mobile },
     roles,
     stores,
-    token: generateToken({ userId: user.id, mobile: user.mobile }),
-    refreshToken: generateRefreshToken({ userId: user.id, mobile: user.mobile }),
+    token: generateToken({ userId: user.id }),
+    refreshToken: generateRefreshToken({ userId: user.id }),
   };
 };
 
@@ -106,8 +94,8 @@ const refreshToken = async (token) => {
   const { verifyToken } = require('../utils/jwt');
   const decoded = verifyToken(token);
   const [[user]] = await db.query('SELECT * FROM users WHERE id = ?', [decoded.userId]);
-  if (!user) throw new Error('USER_NOT_FOUND');
+  if (!user || !user.active) throw new Error('USER_NOT_FOUND');
   return _buildLoginResponse(user);
 };
 
-module.exports = { sendOtp, login, refreshToken };
+module.exports = { login, changePassword, refreshToken };

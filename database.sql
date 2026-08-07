@@ -51,17 +51,17 @@ CREATE TABLE stores (
 CREATE TABLE users (
   id                     BIGINT PRIMARY KEY AUTO_INCREMENT,
   name                   VARCHAR(255) NOT NULL,
-  mobile                 VARCHAR(15) NOT NULL UNIQUE,
+  email                  VARCHAR(255) UNIQUE,
+  mobile                 VARCHAR(15) UNIQUE,
   password_hash          VARCHAR(255),
   first_login            BOOLEAN DEFAULT TRUE,
-  otp_code               VARCHAR(6),
-  otp_expires_at         TIMESTAMP NULL,
   failed_login_attempts  INT DEFAULT 0,
   account_locked_until   TIMESTAMP NULL,
   linked_customer_id     BIGINT NULL,   -- FK added after customers table
   active                 BOOLEAN DEFAULT TRUE,
   created_at             TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_users_mobile (mobile)
+  INDEX idx_users_mobile (mobile),
+  INDEX idx_users_email (email)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================
@@ -419,151 +419,48 @@ CREATE TABLE challan_sequences (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================
--- SEED DATA
+-- SEED DATA — Super Admin only (fresh install)
 -- =====================================================
 
--- Stores
-INSERT INTO stores (id, name, subscription_status, online_payment_enabled, active) VALUES
-(1, 'Demo Temple',  'ACTIVE', FALSE, TRUE),
-(2, 'Test Temple',  'ACTIVE', FALSE, TRUE);
+-- Super Admin user
+INSERT INTO users (id, name, email, mobile, password_hash, first_login, active) VALUES
+(1, 'Super Admin', 'daanoday@gmail.com', '9999999999', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', FALSE, TRUE);
 
--- Users (password = 'password' bcrypt hash)
-INSERT INTO users (id, name, mobile, password_hash, first_login, active) VALUES
-(1, 'Super Admin',  '9999999999', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', FALSE, TRUE),
-(2, 'Demo Admin',   '9999999998', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', FALSE, TRUE),
-(3, 'Test Admin',   '9888888881', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', FALSE, TRUE);
-
--- Update store_admin_id
-UPDATE stores SET store_admin_id = 2 WHERE id = 1;
-UPDATE stores SET store_admin_id = 3 WHERE id = 2;
-
--- Roles: id=1 SUPER_ADMIN (global), id=2 STORE_ADMIN store1, id=3 STORE_ADMIN store2,
---        id=4 SUB_ADMIN store1, id=5 RECEIPT_MANAGER store1, id=6 CASHIER store1
+-- Super Admin role (global - no store)
 INSERT INTO roles (id, store_id, name) VALUES
-(1, NULL, 'SUPER_ADMIN'),
-(2, 1,    'STORE_ADMIN'),
-(3, 2,    'STORE_ADMIN'),
-(4, 1,    'SUB_ADMIN'),
-(5, 1,    'RECEIPT_MANAGER'),
-(6, 1,    'CASHIER');
+(1, NULL, 'SUPER_ADMIN');
 
--- Permissions
-INSERT INTO permissions (id, resource, action) VALUES
-(1,  'receipts',       'create'),
-(2,  'receipts',       'read'),
-(3,  'receipts',       'approve'),
-(4,  'receipts',       'change_request'),
-(5,  'challans',       'create'),
-(6,  'challans',       'read'),
-(7,  'challans',       'change_request'),
-(8,  'customers',      'create'),
-(9,  'customers',      'read'),
-(10, 'customers',      'update'),
-(11, 'customers',      'delete'),
-(12, 'suppliers',      'create'),
-(13, 'suppliers',      'read'),
-(14, 'suppliers',      'update'),
-(15, 'suppliers',      'delete'),
-(16, 'particulars',    'create'),
-(17, 'particulars',    'read'),
-(18, 'particulars',    'update'),
-(19, 'particulars',    'delete'),
-(20, 'users',          'create'),
-(21, 'users',          'read'),
-(22, 'users',          'update'),
-(23, 'users',          'delete'),
-(24, 'roles',          'manage'),
-(25, 'store_settings', 'manage'),
-(26, 'change_requests','approve'),
-(27, 'dashboard',      'read'),
-(28, 'audit_logs',     'read'),
-(29, 'stores',         'manage'),
-(30, 'subscriptions',  'manage');
+-- All permissions
+INSERT INTO permissions (resource, action) VALUES
+('stores',         'read'),   ('stores',         'manage'),
+('users',          'read'),   ('users',          'manage'),
+('roles',          'read'),   ('roles',          'manage'),
+('customers',      'read'),   ('customers',      'manage'),
+('suppliers',      'read'),   ('suppliers',      'manage'),
+('particulars',    'read'),   ('particulars',    'manage'),
+('receipts',       'read'),   ('receipts',       'create'),  ('receipts', 'approve'),
+('challans',       'read'),   ('challans',       'create'),  ('challans', 'approve'),
+('change_requests','read'),   ('change_requests','approve'),
+('transactions',   'read'),
+('reports',        'read'),   ('reports',        'export'),  ('reports',  'import'),
+('dashboard',      'read'),
+('store_settings', 'manage'),
+('audit_logs',     'read'),
+('news_events',    'read'),   ('news_events',    'manage'),
+('notifications',  'read');
 
--- SUPER_ADMIN: all permissions
+-- Assign all permissions to SUPER_ADMIN role
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT 1, id FROM permissions;
 
--- STORE_ADMIN: all except stores.manage and subscriptions.manage
-INSERT INTO role_permissions (role_id, permission_id)
-SELECT 2, id FROM permissions WHERE id NOT IN (29, 30);
-INSERT INTO role_permissions (role_id, permission_id)
-SELECT 3, id FROM permissions WHERE id NOT IN (29, 30);
+-- Assign SUPER_ADMIN role to super admin user (store_id NULL = global)
+INSERT INTO user_roles (user_id, role_id, store_id) VALUES (1, 1, NULL);
 
--- SUB_ADMIN: receipts, challans, customers, suppliers, particulars, dashboard
-INSERT INTO role_permissions (role_id, permission_id) VALUES
-(4, 1),(4, 2),(4, 4),(4, 5),(4, 6),(4, 7),
-(4, 8),(4, 9),(4, 10),(4, 11),
-(4, 12),(4, 13),(4, 14),(4, 15),
-(4, 16),(4, 17),(4, 18),(4, 19),
-(4, 27);
-
--- RECEIPT_MANAGER: receipts, challans, customers read/create, particulars read, dashboard
-INSERT INTO role_permissions (role_id, permission_id) VALUES
-(5, 1),(5, 2),(5, 4),(5, 5),(5, 6),(5, 7),
-(5, 8),(5, 9),(5, 10),
-(5, 17),(5, 27);
-
--- CASHIER: create receipts/challans, read customers/particulars, dashboard
-INSERT INTO role_permissions (role_id, permission_id) VALUES
-(6, 1),(6, 2),(6, 4),(6, 5),(6, 6),(6, 7),
-(6, 9),(6, 17),(6, 27);
-
--- User roles
-INSERT INTO user_roles (user_id, role_id, store_id) VALUES
-(1, 1, 1),  -- super admin → store 1 (global role)
-(2, 2, 1),  -- demo admin → store_admin store 1
-(3, 3, 2);  -- test admin → store_admin store 2
-
--- Store settings
-INSERT INTO store_settings (store_id, receipt_prefix, challan_prefix, auto_approve_cash, cash_approval_limit, sms_enabled, email_enabled) VALUES
-(1, 'REC', 'CHL', FALSE, 1000.00, FALSE, FALSE),
-(2, 'TST', 'TCH', FALSE,  500.00, FALSE, FALSE);
-
--- Subscriptions
-INSERT INTO subscriptions (store_id, plan_type, status, end_date) VALUES
-(1, 'PREMIUM', 'ACTIVE', DATE_ADD(NOW(), INTERVAL 1 YEAR)),
-(2, 'BASIC',   'ACTIVE', DATE_ADD(NOW(), INTERVAL 1 YEAR));
-
--- Receipt/Challan sequences
-INSERT INTO receipt_sequences (store_id, year, last_sequence) VALUES
-(1, YEAR(NOW()), 0),
-(2, YEAR(NOW()), 0);
-INSERT INTO challan_sequences (store_id, year, last_sequence) VALUES
-(1, YEAR(NOW()), 0),
-(2, YEAR(NOW()), 0);
-
--- System settings
-INSERT INTO system_settings (setting_key, setting_value, category, description) VALUES
-('PAYMENT_GATEWAY_ENABLED', 'false', 'PAYMENT', 'Global payment gateway toggle'),
-('SMS_GATEWAY_URL',         '',      'SMS',     'SMS gateway endpoint'),
-('FAILED_LOGIN_LIMIT',      '5',     'SECURITY','Max failed login attempts'),
-('ACCOUNT_LOCK_MINUTES',    '30',    'SECURITY','Lock duration in minutes');
-
--- Sample customers
-INSERT INTO customers (id, name, mobile, first_login) VALUES
-(1, 'Rajesh Kumar', '9876543210', FALSE),
-(2, 'Priya Sharma', '9876543211', FALSE);
-
-INSERT INTO customer_store_access (customer_id, store_id, account_number, is_primary_store) VALUES
-(1, 1, 'CUST000001', TRUE),
-(2, 1, 'CUST000002', TRUE);
-
--- Sample suppliers
-INSERT INTO suppliers (id, store_id, name, mobile, active) VALUES
-(1, 1, 'Temple Supplies Co.', '9876543220', TRUE),
-(2, 1, 'Pooja Items Ltd.',    '9876543221', TRUE);
-
--- Sample particulars
-INSERT INTO particulars (store_id, type, name, active) VALUES
-(1, 'RECEIPT', 'General Donation',      TRUE),
-(1, 'RECEIPT', 'Pooja Offering',        TRUE),
-(1, 'RECEIPT', 'Festival Contribution', TRUE),
-(1, 'CHALLAN', 'Flowers Purchase',      TRUE),
-(1, 'CHALLAN', 'Oil and Ghee',          TRUE);
-
--- Sample news
-INSERT INTO news_events (store_id, type, title, content, publish_date, priority, active, created_by_user_id) VALUES
-(1, 'ANNOUNCEMENT', 'Welcome to DaanoDay', 'Temple management system is now live.', CURDATE(), 1, TRUE, 2);
-
-SET FOREIGN_KEY_CHECKS = 1;
+-- System settings defaults
+INSERT INTO system_settings (key_name, value, category, description) VALUES
+('MAX_STORES_PER_PLAN',    '10',    'PLAN',    'Max stores allowed'),
+('SUBSCRIPTION_GRACE_DAYS','7',     'PLAN',    'Grace period after expiry'),
+('PAYMENT_GATEWAY_ENABLED','false', 'PAYMENT', 'Global payment gateway toggle'),
+('SMS_GATEWAY_URL',        '',      'SMS',     'SMS gateway endpoint'),
+('DEFAULT_RECEIPT_PREFIX', 'RCP',   'RECEIPT', 'Default receipt number prefix'),
+('DEFAULT_CHALLAN_PREFIX', 'CHL',   'CHALLAN', 'Default challan number prefix');

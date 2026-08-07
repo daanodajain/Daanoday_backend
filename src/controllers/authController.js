@@ -1,16 +1,5 @@
-const { sendOtp, login, refreshToken } = require('../services/authService');
+const { login, changePassword, refreshToken } = require('../services/authService');
 const { success, error } = require('../utils/response');
-
-const sendOtpHandler = async (req, res) => {
-  try {
-    const { mobile } = req.body;
-    if (!mobile) return error(res, 'Mobile is required');
-    const result = await sendOtp(mobile);
-    success(res, result);
-  } catch (e) {
-    error(res, e.message);
-  }
-};
 
 const loginHandler = async (req, res) => {
   try {
@@ -18,6 +7,17 @@ const loginHandler = async (req, res) => {
     success(res, data);
   } catch (e) {
     error(res, e.message, 401);
+  }
+};
+
+const changePasswordHandler = async (req, res) => {
+  try {
+    const { newPassword } = req.body;
+    if (!newPassword) return error(res, 'NEW_PASSWORD_REQUIRED');
+    const data = await changePassword(req.user.id, newPassword);
+    success(res, data);
+  } catch (e) {
+    error(res, e.message);
   }
 };
 
@@ -33,8 +33,7 @@ const refreshHandler = async (req, res) => {
 };
 
 const logoutHandler = async (req, res) => {
-  // Stateless JWT - client deletes token. Optionally implement blacklist here.
   success(res, { message: 'Logged out successfully' });
 };
 
-module.exports = { sendOtpHandler, loginHandler, refreshHandler, logoutHandler };
+module.exports = { loginHandler, changePasswordHandler, refreshHandler, logoutHandler };

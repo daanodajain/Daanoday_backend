@@ -1,16 +1,14 @@
 const router = require('express').Router();
 const { authenticate, storeContext } = require('../middleware/auth');
 const db = require('../config/db');
-const bcrypt = require('bcryptjs');
 const { success, error } = require('../utils/response');
 
 router.use(authenticate, storeContext);
 
-// GET /api/user-profile
 router.get('/', async (req, res) => {
   try {
     const [[user]] = await db.query(
-      `SELECT u.id, u.name, u.mobile, u.active, u.first_login, u.created_at,
+      `SELECT u.id, u.name, u.email, u.mobile, u.active, u.first_login, u.created_at,
               r.name as role_name
        FROM users u
        LEFT JOIN user_roles ur ON ur.user_id = u.id AND ur.store_id = ?
@@ -23,19 +21,18 @@ router.get('/', async (req, res) => {
   } catch (e) { error(res, e.message); }
 });
 
-// PUT /api/user-profile
 router.put('/', async (req, res) => {
   try {
-    const { name, mobile } = req.body;
-    await db.query('UPDATE users SET name = ?, mobile = ? WHERE id = ?', [name, mobile, req.user.id]);
-    const [[user]] = await db.query('SELECT id, name, mobile, active, created_at FROM users WHERE id = ?', [req.user.id]);
+    const { name, email, mobile } = req.body;
+    await db.query('UPDATE users SET name = ?, email = ?, mobile = ? WHERE id = ?', [name, email || null, mobile || null, req.user.id]);
+    const [[user]] = await db.query('SELECT id, name, email, mobile, active, created_at FROM users WHERE id = ?', [req.user.id]);
     success(res, user);
   } catch (e) { error(res, e.message); }
 });
 
-// POST /api/user-profile/change-password
 router.post('/change-password', async (req, res) => {
   try {
+    const bcrypt = require('bcryptjs');
     const { currentPassword, newPassword } = req.body;
     const [[user]] = await db.query('SELECT id, password_hash FROM users WHERE id = ?', [req.user.id]);
     if (!user) return error(res, 'USER_NOT_FOUND', 404);
