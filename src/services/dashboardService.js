@@ -100,4 +100,85 @@ const getRecentReceipts = async (storeId, limit = 10) => {
   return rows;
 };
 
-module.exports = { getStats, getRevenueData, getPaymentModeDistribution, getMonthlyComparison, getRecentReceipts };
+
+
+const getPendingApprovals = async (storeId) => {
+  const [receipts] = await db.query(
+    `SELECT r.id, r.receipt_number, r.total_amount, r.payment_mode, r.created_at,
+            c.name as customer_name, c.mobile as customer_mobile
+     FROM receipts r
+     JOIN customers c ON c.id = r.customer_id
+     WHERE r.store_id = ? AND r.receipt_state = 'PENDING_APPROVAL'
+     ORDER BY r.created_at DESC`,
+    [storeId]
+  );
+  const [changeRequests] = await db.query(
+    `SELECT cr.id, cr.entity_type, cr.change_type, cr.created_at, u.name as created_by_name
+     FROM change_requests cr
+     JOIN users u ON u.id = cr.created_by
+     WHERE cr.store_id = ? AND cr.status = 'PENDING'
+     ORDER BY cr.created_at DESC`,
+    [storeId]
+  );
+  return { receipts, changeRequests };
+};
+
+const getReceiptTypeDistribution = async (storeId) => {
+  const [rows] = await db.query(
+    `SELECT rp.particular_name as type, COUNT(*) as count, COALESCE(SUM(rp.amount), 0) as amount
+     FROM receipt_particulars rp
+     JOIN receipts r ON r.id = rp.receipt_id
+     WHERE r.store_id = ? AND r.receipt_state = 'APPROVED'
+       AND DATE(r.created_at) >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+     GROUP BY rp.particular_name
+     ORDER BY amount DESC`,
+    [storeId]
+  );
+  return rows.map(r => ({ ...r, amount: Number(r.amount) }));
+};
+
+const getCustomerGrowth = async (storeId) => {
+  const [rows] = await db.query(
+    `SELECT DATE_FORMAT(created_at, '%Y-%m') as month, COUNT(*) as newCustomers
+     FROM customer_store_access
+     WHERE store_id = ?
+       AND created_at >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
+     GROUP BY DATE_FORMAT(created_at, '%Y-%m')
+     ORDER BY month ASC`,
+    [storeId]
+  );
+  return rows;
+};
+
+const getDailyTrend = async (storeId) => {
+  const [rows] = await db.query(
+    `SELECT DATE(created_at) as date,
+            COUNT(*) as receipts,
+            COALESCE(SUM(total_amount), 0) as amount
+     FROM receipts
+     WHERE store_id = ? AND receipt_state = 'APPROVED'
+       AND DATE(created_at) >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+     GROUP BY DATE(created_at)
+     ORDER BY date ASC`,
+    [storeId]
+  );
+  return rows.map(r => ({ ...r, amount: Number(r.amount) }));
+};
+
+const getYearlyComparison = async (storeId) => {
+  const [rows] = await db.query(
+    `SELECT YEAR(created_at) as year,
+            MONTH(created_at) as month,
+            COALESCE(SUM(total_amount), 0) as amount,
+            COUNT(*) as receipts
+     FROM receipts
+     WHERE store_id = ? AND receipt_state = 'APPROVED'
+       AND YEAR(created_at) >= YEAR(CURDATE()) - 1
+     GROUP BY YEAR(created_at), MONTH(created_at)
+     ORDER BY year, month`,
+    [storeId]
+  );
+  return rows.map(r => ({ ...r, amount: Number(r.amount) }));
+};
+
+module.exports = { getStats, getRevenueData, getPaymentModeDistribution, getMonthlyComparison, getRecentReceipts, getPendingApprovals, getReceiptTypeDistribution, getCustomerGrowth, getDailyTrend, getYearlyComparison };

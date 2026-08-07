@@ -9,6 +9,43 @@ const getAllRoles = async (storeId) => {
   return rows;
 };
 
+const getRoleById = async (id, storeId) => {
+  const [[role]] = await db.query(
+    'SELECT id, name, store_id FROM roles WHERE id = ? AND (store_id = ? OR store_id IS NULL)',
+    [id, storeId]
+  );
+  if (!role) throw new Error('ROLE_NOT_FOUND');
+  return role;
+};
+
+const createRole = async (storeId, data, userId) => {
+  const [result] = await db.query(
+    'INSERT INTO roles (store_id, name) VALUES (?, ?)',
+    [storeId, data.name]
+  );
+  await auditLog.log({ storeId, userId, action: 'ROLE_CREATED', entityType: 'ROLE', entityId: result.insertId });
+  return getRoleById(result.insertId, storeId);
+};
+
+const updateRole = async (id, storeId, data, userId) => {
+  const [[role]] = await db.query('SELECT id FROM roles WHERE id = ? AND store_id = ?', [id, storeId]);
+  if (!role) throw new Error('ROLE_NOT_FOUND');
+  await db.query('UPDATE roles SET name = ? WHERE id = ?', [data.name, id]);
+  await auditLog.log({ storeId, userId, action: 'ROLE_UPDATED', entityType: 'ROLE', entityId: id });
+  return getRoleById(id, storeId);
+};
+
+const deleteRole = async (id, storeId, userId) => {
+  const [[role]] = await db.query('SELECT id FROM roles WHERE id = ? AND store_id = ?', [id, storeId]);
+  if (!role) throw new Error('ROLE_NOT_FOUND');
+  // Check if any user has this role
+  const [[inUse]] = await db.query('SELECT id FROM user_roles WHERE role_id = ? LIMIT 1', [id]);
+  if (inUse) throw new Error('ROLE_IN_USE');
+  await db.query('DELETE FROM role_permissions WHERE role_id = ?', [id]);
+  await db.query('DELETE FROM roles WHERE id = ?', [id]);
+  await auditLog.log({ storeId, userId, action: 'ROLE_DELETED', entityType: 'ROLE', entityId: id });
+};
+
 const getAllPermissions = async () => {
   const [rows] = await db.query('SELECT * FROM permissions ORDER BY resource, action');
   return rows;
@@ -24,7 +61,6 @@ const getRolePermissions = async (roleId) => {
   return rows;
 };
 
-// Assign permissions to a role (replaces existing)
 const assignPermissions = async (roleId, storeId, permissionIds, assignedByUserId) => {
   const [[role]] = await db.query('SELECT id FROM roles WHERE id = ? AND store_id = ?', [roleId, storeId]);
   if (!role) throw new Error('ROLE_NOT_FOUND');
@@ -47,4 +83,35 @@ const assignPermissions = async (roleId, storeId, permissionIds, assignedByUserI
   await auditLog.log({ storeId, userId: assignedByUserId, action: 'ROLE_PERMISSIONS_UPDATED', entityType: 'ROLE', entityId: roleId });
 };
 
-module.exports = { getAllRoles, getAllPermissions, getRolePermissions, assignPermissions };
+// Assign multiple roles to a user in a store
+const assignRolesToUser = async (userId, storeId, roleIds, assignedByUserId) => {
+  const conn = await db.getConnection();
+  await conn.beginTransaction();
+  try {
+    await conn.query('DELETE FROM user_roles WHERE user_id = ? AND store_id = ?', [userId, storeId]);
+    if (roleIds.length) {
+      const vals = roleIds.map(rid => [userId, rid, storeId]);
+      await conn.query('INSERT INTO user_roles (user_id, role_id, store_id) VALUES ?', [vals]);
+    }
+    await conn.commit();
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
+  await auditLog.log({ storeId, userId: assignedByUserId, action: 'USER_ROLES_UPDATED', entityType: 'USER', entityId: userId });
+};
+
+// Get roles assigned to a user in a store
+const getUserRoles = async (userId, storeId) => {
+  const [rows] = await db.query(
+    `SELECT r.id, r.name FROM roles r
+     JOIN user_roles ur ON ur.role_id = r.id
+     WHERE ur.user_id = ? AND ur.store_id = ?`,
+    [userId, storeId]
+  );
+  return rows;
+};
+
+module.exports = { getAllRoles, getRoleById, createRole, updateRole, deleteRole, getAllPermissions, getRolePermissions, assignPermissions, assignRolesToUser, getUserRoles };

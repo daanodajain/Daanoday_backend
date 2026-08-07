@@ -326,17 +326,20 @@ CREATE TABLE change_requests (
 -- TRANSACTIONS  (payment ledger)
 -- =====================================================
 CREATE TABLE transactions (
-  id           BIGINT PRIMARY KEY AUTO_INCREMENT,
-  store_id     BIGINT NOT NULL,
-  type         ENUM('RECEIPT','CHALLAN') NOT NULL,
-  reference_id BIGINT NOT NULL,
-  amount       DECIMAL(12,2) NOT NULL,
-  payment_mode ENUM('CASH','CHEQUE','ONLINE') NOT NULL,
-  status       ENUM('INITIATED','SUCCESS','FAILED') DEFAULT 'INITIATED',
-  created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  id                  BIGINT PRIMARY KEY AUTO_INCREMENT,
+  store_id            BIGINT NOT NULL,
+  type                ENUM('RECEIPT','CHALLAN','ONLINE_PAYMENT','REFUND') NOT NULL,
+  reference_id        BIGINT,
+  amount              DECIMAL(12,2) NOT NULL,
+  payment_mode        ENUM('CASH','CHEQUE','ONLINE') NOT NULL,
+  status              ENUM('INITIATED','SUCCESS','FAILED') DEFAULT 'INITIATED',
+  gateway_order_id    VARCHAR(100) DEFAULT NULL,
+  gateway_payment_id  VARCHAR(100) DEFAULT NULL,
+  created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (store_id) REFERENCES stores(id),
   INDEX idx_txn_store (store_id, created_at),
-  INDEX idx_txn_ref (type, reference_id)
+  INDEX idx_txn_ref (type, reference_id),
+  INDEX idx_txn_gateway (gateway_order_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================

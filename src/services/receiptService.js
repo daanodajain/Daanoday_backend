@@ -207,4 +207,64 @@ const rejectReceipt = async (id, storeId, userId, note) => {
   }
 };
 
-module.exports = { getAll, getById, create, approveReceipt, rejectReceipt, getPendingApprovals, getByDateRange };
+
+
+// State change (generic — covers VOID, CANCELLED etc.)
+const changeState = async (id, storeId, userId, newState, note) => {
+  const [[receipt]] = await db.query(
+    'SELECT * FROM receipts WHERE id = ? AND store_id = ?', [id, storeId]
+  );
+  if (!receipt) throw new Error('RECEIPT_NOT_FOUND');
+
+  await db.query('UPDATE receipts SET receipt_state = ? WHERE id = ?', [newState, id]);
+  await db.query(
+    'INSERT INTO receipt_approvals (receipt_id, approved_by, action, note) VALUES (?, ?, ?, ?)',
+    [id, userId, newState, note || null]
+  );
+  return getById(id, storeId);
+};
+
+// Mark receipt as paid (UNPAID → PAID)
+const markPaid = async (id, storeId, userId) => {
+  const [[receipt]] = await db.query(
+    'SELECT * FROM receipts WHERE id = ? AND store_id = ?', [id, storeId]
+  );
+  if (!receipt) throw new Error('RECEIPT_NOT_FOUND');
+  if (receipt.status === 'PAID') throw new Error('ALREADY_PAID');
+
+  const conn = await db.getConnection();
+  await conn.beginTransaction();
+  try {
+    await conn.query("UPDATE receipts SET status = 'PAID' WHERE id = ?", [id]);
+    await conn.query(
+      "UPDATE transactions SET status = 'SUCCESS' WHERE type = 'RECEIPT' AND reference_id = ?", [id]
+    );
+    await conn.commit();
+    return getById(id, storeId);
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
+};
+
+// Get approval history for a receipt
+const getApprovals = async (id, storeId) => {
+  const [[receipt]] = await db.query(
+    'SELECT id FROM receipts WHERE id = ? AND store_id = ?', [id, storeId]
+  );
+  if (!receipt) throw new Error('RECEIPT_NOT_FOUND');
+
+  const [rows] = await db.query(
+    `SELECT ra.*, u.name as approved_by_name
+     FROM receipt_approvals ra
+     LEFT JOIN users u ON u.id = ra.approved_by
+     WHERE ra.receipt_id = ?
+     ORDER BY ra.created_at ASC`,
+    [id]
+  );
+  return rows;
+};
+
+module.exports = { getAll, getById, create, approveReceipt, rejectReceipt, getPendingApprovals, getByDateRange, changeState, markPaid, getApprovals };

@@ -18,6 +18,12 @@ app.use('/api/customer-auth', require('./routes/customerAuthRoutes'));
 // Super Admin (no store context needed)
 app.use('/api/super-admin',   require('./routes/superAdminRoutes'));
 
+// Store context switch (authenticate only, no storeContext — sets context)
+app.use('/api/store-context', require('./routes/storeContextRoutes'));
+
+// Customer self-service portal
+app.use('/api/customer-profile', require('./routes/customerProfileRoutes'));
+
 // Store-scoped routes (all require x-store-id header)
 app.use('/api/stores',         require('./routes/storeRoutes'));
 app.use('/api/store-settings', require('./routes/storeSettingsRoutes'));
@@ -33,7 +39,14 @@ app.use('/api/transactions',   require('./routes/transactionRoutes'));
 app.use('/api/dashboard',      require('./routes/dashboardRoutes'));
 app.use('/api/notifications',  require('./routes/notificationRoutes'));
 app.use('/api/news-events',    require('./routes/newsEventRoutes'));
-app.use('/api/audit-logs',     require('./routes/auditLogRoutes'));
+app.use('/api/reports',        require('./routes/reportRoutes'));
+app.use('/api/payments',       require('./routes/paymentRoutes'));
+app.use('/api/user-profile',   require('./routes/userProfileRoutes'));
+
+// Audit logs — register under both /api/audit-logs AND /api/audit (frontend uses /api/audit/entity/...)
+const auditRoutes = require('./routes/auditLogRoutes');
+app.use('/api/audit-logs', auditRoutes);
+app.use('/api/audit',      auditRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => res.json({ status: 'UP' }));

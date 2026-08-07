@@ -21,7 +21,12 @@ const getByDateRange = async (req, res) => {
   catch (e) { error(res, e.message); }
 };
 
+const reject = async (req, res) => {
+  try { success(res, await svc.rejectChallan(req.params.id, req.storeId, req.user.id, req.body.note)); }
+  catch (e) { error(res, e.message); }
+};
+
 const notAllowed = (req, res) =>
   res.status(405).json({ status: 'ERROR', DDMS_error_code: 'USE_CHANGE_REQUEST_ENDPOINT' });
 
-module.exports = { getAll, getById, create, getByDateRange, notAllowed };
+module.exports = { getAll, getById, create, getByDateRange, reject, notAllowed };

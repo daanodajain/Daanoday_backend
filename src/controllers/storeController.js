@@ -11,4 +11,10 @@ const update = async (req, res) => {
   catch (e) { error(res, e.message); }
 };
 
-module.exports = { getOne, update };
+// PUT /stores/:id — frontend calls this
+const updateById = async (req, res) => {
+  try { success(res, await svc.updateStore(req.params.id, req.body)); }
+  catch (e) { error(res, e.message); }
+};
+
+module.exports = { getOne, update, updateById };

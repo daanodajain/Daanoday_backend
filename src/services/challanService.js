@@ -103,4 +103,30 @@ const create = async (data, storeId, userId) => {
 };
 
 // No direct update/delete — must go through change_requests
-module.exports = { getAll, getById, create, getByDateRange };
+
+// Reject a challan (UNPAID → REJECTED)
+const rejectChallan = async (id, storeId, userId, note) => {
+  const [[challan]] = await db.query(
+    'SELECT * FROM challans WHERE id = ? AND store_id = ?', [id, storeId]
+  );
+  if (!challan) throw new Error('CHALLAN_NOT_FOUND');
+  if (challan.status === 'PAID') throw new Error('CANNOT_REJECT_PAID_CHALLAN');
+
+  const conn = await db.getConnection();
+  await conn.beginTransaction();
+  try {
+    await conn.query("UPDATE challans SET status = 'REJECTED' WHERE id = ?", [id]);
+    await conn.query(
+      "UPDATE transactions SET status = 'FAILED' WHERE type = 'CHALLAN' AND reference_id = ?", [id]
+    );
+    await conn.commit();
+    return getById(id, storeId);
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
+};
+
+module.exports = { getAll, getById, create, getByDateRange, rejectChallan };

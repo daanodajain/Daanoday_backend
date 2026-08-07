@@ -8,6 +8,7 @@ router.get('/by-date', ctrl.getByDateRange);
 router.get('/', ctrl.getAll);
 router.get('/:id', ctrl.getById);
 router.post('/', requirePermission('challans', 'create'), ctrl.create);
+router.post('/:id/reject', requirePermission('challans', 'approve'), ctrl.reject);
 
 // Direct edit/delete not allowed — use /api/change-requests
 router.put('/:id', ctrl.notAllowed);

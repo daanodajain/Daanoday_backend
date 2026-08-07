@@ -19,4 +19,18 @@ const getAll = async (storeId, limit = 100) => {
   return rows;
 };
 
-module.exports = { log, getAll };
+
+
+const getByEntity = async (storeId, entityType, entityId) => {
+  const [rows] = await db.query(
+    `SELECT al.*, u.name as user_name
+     FROM audit_logs al
+     LEFT JOIN users u ON u.id = al.user_id
+     WHERE al.store_id = ? AND al.entity_type = ? AND al.entity_id = ?
+     ORDER BY al.created_at DESC`,
+    [storeId, entityType, entityId]
+  );
+  return rows;
+};
+
+module.exports = { log, getAll, getByEntity };

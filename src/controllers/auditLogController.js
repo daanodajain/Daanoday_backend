@@ -6,4 +6,9 @@ const getAll = async (req, res) => {
   catch (e) { error(res, e.message); }
 };
 
-module.exports = { getAll };
+const getByEntity = async (req, res) => {
+  try { success(res, await svc.getByEntity(req.storeId, req.params.entityName, req.params.entityId)); }
+  catch (e) { error(res, e.message); }
+};
+
+module.exports = { getAll, getByEntity };
