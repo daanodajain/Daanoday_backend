@@ -88,6 +88,7 @@ const getAllStoresWithSubscription = async () => {
      FROM stores s
      LEFT JOIN users u ON u.id = s.store_admin_id
      LEFT JOIN subscriptions sub ON sub.store_id = s.id
+     WHERE s.active = TRUE
      ORDER BY s.created_at DESC`
   );
   return rows;
