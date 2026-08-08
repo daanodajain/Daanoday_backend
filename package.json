@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "src/app.js",
   "scripts": {
-    "build": "mkdir -p nodejs && cp -r src nodejs/src && cp package.json nodejs/package.json",
+    "build": "cp -r src nodejs && cp package.json nodejs/ && cd nodejs && npm install --production",
     "start": "node src/app.js",
     "dev": "nodemon src/app.js"
   },
