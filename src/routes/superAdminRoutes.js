@@ -4,9 +4,11 @@ const { authenticate } = require('../middleware/auth');
 
 router.use(authenticate);
 
-// Stores
+// Stores CRUD
 router.get('/stores', ctrl.getAllStores);
+router.get('/stores/:id', ctrl.getStore);
 router.post('/stores', ctrl.createStoreWithAdmin);
+router.put('/stores/:id', ctrl.updateStoreWithAdmin);
 router.delete('/stores/:id', ctrl.deleteStore);
 
 // System settings

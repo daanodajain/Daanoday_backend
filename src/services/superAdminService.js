@@ -81,9 +81,12 @@ const suspendSubscription = async (storeId, reason, userId) => {
 
 const getAllStoresWithSubscription = async () => {
   const [rows] = await db.query(
-    `SELECT s.id, s.name, s.subscription_status, s.active, s.created_at,
-            sub.plan_type, sub.status as sub_status, sub.end_date
+    `SELECT s.id, s.name, s.address, s.city, s.state, s.contact, s.email,
+            s.subscription_status, s.online_payment_enabled, s.active, s.created_at,
+            u.name as admin_name, u.mobile as admin_mobile, u.email as admin_email,
+            sub.plan_type, sub.status as sub_status, sub.end_date as subscriptionExpiresAt
      FROM stores s
+     LEFT JOIN users u ON u.id = s.store_admin_id
      LEFT JOIN subscriptions sub ON sub.store_id = s.id
      ORDER BY s.created_at DESC`
   );

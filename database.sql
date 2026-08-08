@@ -35,14 +35,19 @@ DROP TABLE IF EXISTS stores;
 -- STORES
 -- =====================================================
 CREATE TABLE stores (
-  id            BIGINT PRIMARY KEY AUTO_INCREMENT,
-  name          VARCHAR(255) NOT NULL,
-  store_admin_id BIGINT NULL,
-  subscription_status ENUM('ACTIVE','EXPIRED','SUSPENDED') DEFAULT 'ACTIVE',
+  id                     BIGINT PRIMARY KEY AUTO_INCREMENT,
+  name                   VARCHAR(255) NOT NULL,
+  address                VARCHAR(500),
+  city                   VARCHAR(100),
+  state                  VARCHAR(100),
+  contact                VARCHAR(20),
+  email                  VARCHAR(255),
+  store_admin_id         BIGINT NULL,
+  subscription_status    ENUM('ACTIVE','EXPIRED','SUSPENDED') DEFAULT 'ACTIVE',
   online_payment_enabled BOOLEAN DEFAULT FALSE,
-  active        BOOLEAN DEFAULT TRUE,
-  created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  active                 BOOLEAN DEFAULT TRUE,
+  created_at             TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at             TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================
