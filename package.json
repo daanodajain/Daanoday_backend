@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "src/app.js",
   "scripts": {
-    "build": "echo 'No build step needed for Node.js backend'",
+    "build": "mkdir -p nodejs && cp -r src nodejs/src && cp package.json nodejs/package.json",
     "start": "node src/app.js",
     "dev": "nodemon src/app.js"
   },
