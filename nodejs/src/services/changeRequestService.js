@@ -115,10 +115,25 @@ const approveChangeRequest = async (id, reviewedBy, reviewNote) => {
     // 2. Apply the change atomically
     const table = cr.entity_type === 'RECEIPT' ? 'receipts' : 'challans';
     if (cr.action === 'DELETE') {
-      await conn.query(
-        `UPDATE ${table} SET status = 'CANCELLED', cancel_reason = ? WHERE id = ?`,
-        [cr.reason, cr.entity_id]
-      );
+      if (cr.entity_type === 'RECEIPT') {
+        await conn.query(
+          "UPDATE receipts SET receipt_state = 'CANCELLED', cancel_reason = ? WHERE id = ?",
+          [cr.reason, cr.entity_id]
+        );
+        await conn.query(
+          "UPDATE transactions SET status = 'FAILED' WHERE type = 'RECEIPT' AND reference_id = ?",
+          [cr.entity_id]
+        );
+      } else {
+        await conn.query(
+          "UPDATE challans SET status = 'CANCELLED', cancel_reason = ? WHERE id = ?",
+          [cr.reason, cr.entity_id]
+        );
+        await conn.query(
+          "UPDATE transactions SET status = 'FAILED' WHERE type = 'CHALLAN' AND reference_id = ?",
+          [cr.entity_id]
+        );
+      }
     } else if (cr.action === 'UPDATE') {
       const newData = JSON.parse(cr.new_data);
       // Only allow safe fields to be updated

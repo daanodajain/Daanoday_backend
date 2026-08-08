@@ -67,12 +67,19 @@ const updateStore = async (id, data) => {
     }
   }
 
-  // Update subscription expiry if provided
-  if (data.subscriptionExpiresAt) {
-    await db.query(
-      `UPDATE subscriptions SET end_date = ? WHERE store_id = ?`,
-      [data.subscriptionExpiresAt, id]
-    );
+  // Update subscription — sync both end_date and status
+  if (data.subscriptionExpiresAt || data.subscriptionStatus) {
+    const [[sub]] = await db.query('SELECT id FROM subscriptions WHERE store_id = ?', [id]);
+    if (sub) {
+      const updates = [];
+      const vals = [];
+      if (data.subscriptionExpiresAt) { updates.push('end_date = ?'); vals.push(data.subscriptionExpiresAt); }
+      if (data.subscriptionStatus)    { updates.push('status = ?');   vals.push(data.subscriptionStatus); }
+      if (updates.length) {
+        vals.push(id);
+        await db.query(`UPDATE subscriptions SET ${updates.join(', ')} WHERE store_id = ?`, vals);
+      }
+    }
   }
 
   return getStoreById(id);

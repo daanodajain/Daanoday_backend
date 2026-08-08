@@ -26,7 +26,12 @@ const reject = async (req, res) => {
   catch (e) { error(res, e.message); }
 };
 
+const approve = async (req, res) => {
+  try { success(res, await svc.approveChallan(req.params.id, req.storeId, req.user.id)); }
+  catch (e) { error(res, e.message); }
+};
+
 const notAllowed = (req, res) =>
   res.status(405).json({ status: 'ERROR', DDMS_error_code: 'USE_CHANGE_REQUEST_ENDPOINT' });
 
-module.exports = { getAll, getById, create, getByDateRange, reject, notAllowed };
+module.exports = { getAll, getById, create, getByDateRange, approve, reject, notAllowed };

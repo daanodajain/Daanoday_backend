@@ -115,7 +115,7 @@ const rejectChallan = async (id, storeId, userId, note) => {
   const conn = await db.getConnection();
   await conn.beginTransaction();
   try {
-    await conn.query("UPDATE challans SET status = 'REJECTED' WHERE id = ?", [id]);
+    await conn.query("UPDATE challans SET status = 'CANCELLED', cancel_reason = ? WHERE id = ?", [note || 'Rejected', id]);
     await conn.query(
       "UPDATE transactions SET status = 'FAILED' WHERE type = 'CHALLAN' AND reference_id = ?", [id]
     );
@@ -129,4 +129,31 @@ const rejectChallan = async (id, storeId, userId, note) => {
   }
 };
 
-module.exports = { getAll, getById, create, getByDateRange, rejectChallan };
+
+// Mark challan as paid (UNPAID → PAID)
+const approveChallan = async (id, storeId, userId) => {
+  const [[challan]] = await db.query(
+    'SELECT * FROM challans WHERE id = ? AND store_id = ?', [id, storeId]
+  );
+  if (!challan) throw new Error('CHALLAN_NOT_FOUND');
+  if (challan.status === 'PAID') throw new Error('ALREADY_PAID');
+  if (challan.status === 'CANCELLED') throw new Error('CHALLAN_CANCELLED');
+
+  const conn = await db.getConnection();
+  await conn.beginTransaction();
+  try {
+    await conn.query("UPDATE challans SET status = 'PAID' WHERE id = ?", [id]);
+    await conn.query(
+      "UPDATE transactions SET status = 'SUCCESS' WHERE type = 'CHALLAN' AND reference_id = ?", [id]
+    );
+    await conn.commit();
+    return getById(id, storeId);
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
+};
+
+module.exports = { getAll, getById, create, getByDateRange, rejectChallan, approveChallan };
