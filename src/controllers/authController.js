@@ -1,4 +1,4 @@
-const { login, changePassword, refreshToken } = require('../services/authService');
+const { login, changePassword, refreshToken, verifyUnlockPassword } = require('../services/authService');
 const { success, error } = require('../utils/response');
 
 const loginHandler = async (req, res) => {
@@ -36,4 +36,14 @@ const logoutHandler = async (req, res) => {
   success(res, { message: 'Logged out successfully' });
 };
 
-module.exports = { loginHandler, changePasswordHandler, refreshHandler, logoutHandler };
+const unlockHandler = async (req, res) => {
+  try {
+    const { password } = req.body;
+    const data = await verifyUnlockPassword(req.user.id, password);
+    success(res, data);
+  } catch (e) {
+    error(res, e.message, 401);
+  }
+};
+
+module.exports = { loginHandler, changePasswordHandler, refreshHandler, logoutHandler, unlockHandler };

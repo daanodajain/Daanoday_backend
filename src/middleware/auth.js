@@ -34,11 +34,12 @@ const storeContext = async (req, res, next) => {
     [req.user.id, storeId]
   );
 
-  // Also check global SUPER_ADMIN role (store_id IS NULL)
+  // Also check global SUPER_ADMIN role — MUST be the true global role (store_id IS NULL).
+  // A store-scoped role that merely happens to be named 'SUPER_ADMIN' must NEVER grant this.
   const [[superAdminRole]] = await db.query(
     `SELECT r.name FROM user_roles ur
      JOIN roles r ON r.id = ur.role_id
-     WHERE ur.user_id = ? AND r.name = 'SUPER_ADMIN'`,
+     WHERE ur.user_id = ? AND r.name = 'SUPER_ADMIN' AND r.store_id IS NULL`,
     [req.user.id]
   );
 
@@ -46,6 +47,9 @@ const storeContext = async (req, res, next) => {
 
   req.storeId = storeId;
   req.userRoleInStore = rows[0]?.role_name || 'SUPER_ADMIN';
+  // Verified global super-admin flag — only true if the store_id IS NULL check above matched.
+  // Do NOT derive this from userRoleInStore, since a store-scoped role could share the name.
+  req.isSuperAdmin = !!superAdminRole;
   next();
 };
 
@@ -53,8 +57,8 @@ const storeContext = async (req, res, next) => {
 const requirePermission = (resource, action) => async (req, res, next) => {
   const storeId = req.storeId || req.headers['x-store-id'];
 
-  // SUPER_ADMIN always passes
-  if (req.userRoleInStore === 'SUPER_ADMIN') return next();
+  // SUPER_ADMIN always passes — only the verified global flag, never a name string match
+  if (req.isSuperAdmin) return next();
 
   const [rows] = await db.query(
     `SELECT p.id FROM permissions p

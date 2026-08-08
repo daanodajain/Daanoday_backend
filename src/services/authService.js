@@ -90,6 +90,26 @@ const _buildLoginResponse = async (user) => {
   };
 };
 
+// Verify password for an already-authenticated user (inactivity-lock unlock).
+// Does NOT issue new tokens — the existing session token is still valid,
+// this just confirms the person at the keyboard is still the account owner.
+const verifyUnlockPassword = async (userId, password) => {
+  if (!password) throw new Error('PASSWORD_REQUIRED');
+  const [[user]] = await db.query('SELECT * FROM users WHERE id = ?', [userId]);
+  if (!user || !user.active) throw new Error('USER_NOT_FOUND');
+
+  if (user.account_locked_until && new Date(user.account_locked_until) > new Date())
+    throw new Error('ACCOUNT_LOCKED');
+
+  const valid = user.password_hash && await bcrypt.compare(password, user.password_hash);
+  if (!valid) {
+    await _incrementFailedAttempts(user);
+    throw new Error('INVALID_PASSWORD');
+  }
+  await db.query('UPDATE users SET failed_login_attempts = 0 WHERE id = ?', [user.id]);
+  return { message: 'Unlocked' };
+};
+
 const refreshToken = async (token) => {
   const { verifyToken } = require('../utils/jwt');
   const decoded = verifyToken(token);
@@ -98,4 +118,4 @@ const refreshToken = async (token) => {
   return _buildLoginResponse(user);
 };
 
-module.exports = { login, changePassword, refreshToken };
+module.exports = { login, changePassword, refreshToken, verifyUnlockPassword };

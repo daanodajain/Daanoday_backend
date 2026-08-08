@@ -6,5 +6,6 @@ router.post('/login', auth.loginHandler);
 router.post('/change-password', authenticate, auth.changePasswordHandler);
 router.post('/refresh', auth.refreshHandler);
 router.post('/logout', auth.logoutHandler);
+router.post('/unlock', authenticate, auth.unlockHandler);
 
 module.exports = router;

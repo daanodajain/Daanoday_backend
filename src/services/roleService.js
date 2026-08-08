@@ -3,7 +3,7 @@ const auditLog = require('./auditLogService');
 
 const getAllRoles = async (storeId) => {
   const [rows] = await db.query(
-    'SELECT r.id, r.name, r.store_id FROM roles r WHERE r.store_id = ? OR r.store_id IS NULL',
+    "SELECT r.id, r.name, r.store_id FROM roles r WHERE (r.store_id = ? OR r.store_id IS NULL) AND r.name != 'SUPER_ADMIN'",
     [storeId]
   );
   return rows;
@@ -11,14 +11,19 @@ const getAllRoles = async (storeId) => {
 
 const getRoleById = async (id, storeId) => {
   const [[role]] = await db.query(
-    'SELECT id, name, store_id FROM roles WHERE id = ? AND (store_id = ? OR store_id IS NULL)',
+    "SELECT id, name, store_id FROM roles WHERE id = ? AND (store_id = ? OR store_id IS NULL) AND name != 'SUPER_ADMIN'",
     [id, storeId]
   );
   if (!role) throw new Error('ROLE_NOT_FOUND');
   return role;
 };
 
+const RESERVED_ROLE_NAMES = ['SUPER_ADMIN'];
+
 const createRole = async (storeId, data, userId) => {
+  if (RESERVED_ROLE_NAMES.includes((data.name || '').trim().toUpperCase())) {
+    throw new Error('RESERVED_ROLE_NAME');
+  }
   const [result] = await db.query(
     'INSERT INTO roles (store_id, name) VALUES (?, ?)',
     [storeId, data.name]
@@ -28,6 +33,9 @@ const createRole = async (storeId, data, userId) => {
 };
 
 const updateRole = async (id, storeId, data, userId) => {
+  if (RESERVED_ROLE_NAMES.includes((data.name || '').trim().toUpperCase())) {
+    throw new Error('RESERVED_ROLE_NAME');
+  }
   const [[role]] = await db.query('SELECT id FROM roles WHERE id = ? AND store_id = ?', [id, storeId]);
   if (!role) throw new Error('ROLE_NOT_FOUND');
   await db.query('UPDATE roles SET name = ? WHERE id = ?', [data.name, id]);
@@ -85,6 +93,19 @@ const assignPermissions = async (roleId, storeId, permissionIds, assignedByUserI
 
 // Assign multiple roles to a user in a store
 const assignRolesToUser = async (userId, storeId, roleIds, assignedByUserId) => {
+  // Security: only allow roles that are valid for this store and never SUPER_ADMIN,
+  // regardless of what the client sends — prevents privilege escalation via direct API calls.
+  if (roleIds.length) {
+    const [validRoles] = await db.query(
+      `SELECT id FROM roles WHERE id IN (${roleIds.map(() => '?').join(',')})
+       AND (store_id = ? OR store_id IS NULL) AND name != 'SUPER_ADMIN'`,
+      [...roleIds, storeId]
+    );
+    const validIds = new Set(validRoles.map(r => r.id));
+    const invalid = roleIds.filter(rid => !validIds.has(rid));
+    if (invalid.length) throw new Error('INVALID_ROLE_ASSIGNMENT');
+  }
+
   const conn = await db.getConnection();
   await conn.beginTransaction();
   try {

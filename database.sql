@@ -124,6 +124,8 @@ CREATE TABLE store_settings (
   enable_80g              BOOLEAN DEFAULT FALSE,
   auto_send_receipt_sms   BOOLEAN DEFAULT TRUE,
   auto_send_receipt_email BOOLEAN DEFAULT FALSE,
+  session_timeout_minutes INT NULL,
+  inactivity_lock_minutes INT NULL,
   FOREIGN KEY (store_id) REFERENCES stores(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

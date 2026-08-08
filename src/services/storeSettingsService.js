@@ -10,19 +10,32 @@ const getByStore = async (storeId) => {
 const update = async (storeId, data, userId) => {
   const [[existing]] = await db.query('SELECT id FROM store_settings WHERE store_id = ?', [storeId]);
 
-  const fields = [
-    'receipt_prefix', 'challan_prefix', 'auto_approve_cash', 'cash_approval_limit',
-    'razorpay_key_id', 'razorpay_key_secret', 'sms_enabled', 'email_enabled',
-    'locked_before_date', 'enable_80g', 'auto_send_receipt_sms', 'auto_send_receipt_email'
-  ];
   const camelToSnake = {
     receiptPrefix: 'receipt_prefix', challanPrefix: 'challan_prefix',
     autoApproveCash: 'auto_approve_cash', cashApprovalLimit: 'cash_approval_limit',
     razorpayKeyId: 'razorpay_key_id', razorpayKeySecret: 'razorpay_key_secret',
     smsEnabled: 'sms_enabled', emailEnabled: 'email_enabled',
     lockedBeforeDate: 'locked_before_date', enable80g: 'enable_80g',
-    autoSendReceiptSms: 'auto_send_receipt_sms', autoSendReceiptEmail: 'auto_send_receipt_email'
+    autoSendReceiptSms: 'auto_send_receipt_sms', autoSendReceiptEmail: 'auto_send_receipt_email',
+    sessionTimeoutMinutes: 'session_timeout_minutes', inactivityLockMinutes: 'inactivity_lock_minutes'
   };
+
+  if (data.sessionTimeoutMinutes !== undefined && data.sessionTimeoutMinutes !== null) {
+    if (!Number.isInteger(data.sessionTimeoutMinutes) || data.sessionTimeoutMinutes <= 0) {
+      throw new Error('INVALID_SESSION_TIMEOUT');
+    }
+  }
+  if (data.inactivityLockMinutes !== undefined && data.inactivityLockMinutes !== null) {
+    if (!Number.isInteger(data.inactivityLockMinutes) || data.inactivityLockMinutes <= 0) {
+      throw new Error('INVALID_INACTIVITY_LOCK');
+    }
+  }
+  if (
+    data.sessionTimeoutMinutes && data.inactivityLockMinutes &&
+    data.inactivityLockMinutes >= data.sessionTimeoutMinutes
+  ) {
+    throw new Error('INACTIVITY_LOCK_MUST_BE_LESS_THAN_SESSION_TIMEOUT');
+  }
 
   const sets = [];
   const vals = [];
