@@ -92,7 +92,6 @@ const create = async (data, storeId, userId) => {
   const conn = await db.getConnection();
   await conn.beginTransaction();
   try {
-    // Resolve customer — create if needed, link staff user
     const { customerId } = await findOrCreateCustomerForStore(
       data.customerMobile, data.customerName, storeId, userId, conn
     );
@@ -102,24 +101,39 @@ const create = async (data, storeId, userId) => {
       [storeId]
     );
 
-    const needsApproval = data.paymentMode === 'CASH'
-      && settings
-      && !settings.auto_approve_cash
-      && Number(data.totalAmount) > Number(settings.cash_approval_limit || 0);
+    const isDue = data.isDue === true || data.isDue === 'true';
 
-    const receiptState = needsApproval ? 'PENDING_APPROVAL' : 'APPROVED';
-    const status = needsApproval ? 'UNPAID' : 'PAID';
+    // Due receipt — always PENDING, UNPAID, no payment mode needed
+    let receiptState, status;
+    if (isDue) {
+      receiptState = 'APPROVED'; // approved but unpaid
+      status = 'UNPAID';
+    } else {
+      const needsApproval = data.paymentMode === 'CASH'
+        && settings
+        && !settings.auto_approve_cash
+        && Number(data.totalAmount) > Number(settings.cash_approval_limit || 0);
+      receiptState = needsApproval ? 'PENDING_APPROVAL' : 'APPROVED';
+      status = needsApproval ? 'UNPAID' : 'PAID';
+    }
 
     const receiptNumber = await _generateReceiptNumber(storeId, conn);
+    const receiptDate = data.receiptDate || new Date().toISOString().split('T')[0];
+    const paymentDate = isDue ? null : (data.paymentDate || receiptDate);
+    const paymentMode = isDue ? null : (data.paymentMode || 'CASH');
 
     const [result] = await conn.query(
-      `INSERT INTO receipts (store_id, receipt_number, customer_id, total_amount, payment_mode, receipt_state, status, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [storeId, receiptNumber, customerId, data.totalAmount, data.paymentMode, receiptState, status, userId]
+      `INSERT INTO receipts
+        (store_id, receipt_number, customer_id, total_amount, payment_mode,
+         receipt_date, payment_date, is_due, remarks,
+         receipt_state, status, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [storeId, receiptNumber, customerId, data.totalAmount, paymentMode,
+       receiptDate, paymentDate, isDue, data.remarks || null,
+       receiptState, status, userId]
     );
     const receiptId = result.insertId;
 
-    // Insert particulars
     if (data.particulars?.length) {
       const vals = data.particulars.map(p => [receiptId, p.particularId, p.particularName, p.amount]);
       await conn.query(
@@ -128,12 +142,13 @@ const create = async (data, storeId, userId) => {
       );
     }
 
-    // Create transaction record
-    const txnStatus = needsApproval ? 'INITIATED' : 'SUCCESS';
-    await conn.query(
-      'INSERT INTO transactions (store_id, type, reference_id, amount, payment_mode, status) VALUES (?, ?, ?, ?, ?, ?)',
-      [storeId, 'RECEIPT', receiptId, data.totalAmount, data.paymentMode, txnStatus]
-    );
+    const txnStatus = status === 'PAID' ? 'SUCCESS' : 'INITIATED';
+    if (!isDue) {
+      await conn.query(
+        'INSERT INTO transactions (store_id, type, reference_id, amount, payment_mode, status) VALUES (?, ?, ?, ?, ?, ?)',
+        [storeId, 'RECEIPT', receiptId, data.totalAmount, paymentMode, txnStatus]
+      );
+    }
 
     await conn.commit();
     return getById(receiptId, storeId);
