@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "src/app.js",
   "scripts": {
-    "build": "echo 'nodejs folder already in repo'",
+    "build": "mkdir -p nodejs && cp -r src/* nodejs/src 2>/dev/null || (mkdir -p nodejs/src && cp -r src/. nodejs/src/) && cp package.json nodejs/",
     "start": "node src/app.js",
     "dev": "nodemon src/app.js"
   },
