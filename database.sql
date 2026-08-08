@@ -424,48 +424,61 @@ CREATE TABLE challan_sequences (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =====================================================
--- SEED DATA — Super Admin only (fresh install)
+-- =====================================================
+-- FRESH SEED v2 — Super Admin only, permissions fixed
 -- =====================================================
 
 -- Super Admin user
-INSERT INTO users (id, name, email, mobile, password_hash, first_login, active) VALUES
-(1, 'Super Admin', 'daanoday@gmail.com', '9999999999', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', FALSE, TRUE);
+INSERT INTO users (name, email, mobile, password_hash, first_login, active) VALUES
+('Super Admin', 'daanoday@gmail.com', '8889400010', '$2b$10$aMveXWWhnMDcaTrYj5EFB.0WU.XaJ0QHT0c0KOt5Q34LKwPxEI7OW', FALSE, TRUE);
 
 -- Super Admin role (global - no store)
-INSERT INTO roles (id, store_id, name) VALUES
-(1, NULL, 'SUPER_ADMIN');
+INSERT INTO roles (id, store_id, name) VALUES (1, NULL, 'SUPER_ADMIN');
 
--- All permissions
+-- ALL permissions (matching exact resource:action used in routes)
 INSERT INTO permissions (resource, action) VALUES
-('stores',         'read'),   ('stores',         'manage'),
-('users',          'read'),   ('users',          'manage'),
-('roles',          'read'),   ('roles',          'manage'),
-('customers',      'read'),   ('customers',      'manage'),
-('suppliers',      'read'),   ('suppliers',      'manage'),
-('particulars',    'read'),   ('particulars',    'manage'),
-('receipts',       'read'),   ('receipts',       'create'),  ('receipts', 'approve'),
-('challans',       'read'),   ('challans',       'create'),  ('challans', 'approve'),
-('change_requests','read'),   ('change_requests','approve'),
-('transactions',   'read'),
-('reports',        'read'),   ('reports',        'export'),  ('reports',  'import'),
-('dashboard',      'read'),
-('store_settings', 'manage'),
-('audit_logs',     'read'),
-('news_events',    'read'),   ('news_events',    'manage'),
-('notifications',  'read');
+-- Users
+('users','read'),('users','create'),('users','update'),('users','delete'),('users','manage'),
+-- Roles
+('roles','read'),('roles','manage'),
+-- Customers
+('customers','read'),('customers','create'),('customers','update'),('customers','delete'),('customers','manage'),
+-- Suppliers
+('suppliers','read'),('suppliers','create'),('suppliers','update'),('suppliers','delete'),('suppliers','manage'),
+-- Particulars
+('particulars','read'),('particulars','create'),('particulars','update'),('particulars','delete'),('particulars','manage'),
+-- Receipts
+('receipts','read'),('receipts','create'),('receipts','approve'),('receipts','change_request'),
+-- Challans
+('challans','read'),('challans','create'),('challans','approve'),
+-- Change Requests
+('change_requests','read'),('change_requests','approve'),
+-- Transactions
+('transactions','read'),
+-- Reports
+('reports','read'),('reports','export'),('reports','import'),
+-- Dashboard
+('dashboard','read'),
+-- Store Settings
+('store_settings','manage'),
+-- Audit Logs
+('audit_logs','read'),
+-- News Events
+('news_events','read'),('news_events','manage'),
+-- Notifications
+('notifications','read');
 
--- Assign all permissions to SUPER_ADMIN role
-INSERT INTO role_permissions (role_id, permission_id)
-SELECT 1, id FROM permissions;
+-- Assign ALL permissions to SUPER_ADMIN role
+INSERT INTO role_permissions (role_id, permission_id) SELECT 1, id FROM permissions;
 
--- Assign SUPER_ADMIN role to super admin user (store_id NULL = global)
+-- Assign SUPER_ADMIN to user id=1 (store_id NULL = global)
 INSERT INTO user_roles (user_id, role_id, store_id) VALUES (1, 1, NULL);
 
 -- System settings defaults
 INSERT INTO system_settings (key_name, value, category, description) VALUES
-('MAX_STORES_PER_PLAN',    '10',    'PLAN',    'Max stores allowed'),
-('SUBSCRIPTION_GRACE_DAYS','7',     'PLAN',    'Grace period after expiry'),
-('PAYMENT_GATEWAY_ENABLED','false', 'PAYMENT', 'Global payment gateway toggle'),
-('SMS_GATEWAY_URL',        '',      'SMS',     'SMS gateway endpoint'),
-('DEFAULT_RECEIPT_PREFIX', 'RCP',   'RECEIPT', 'Default receipt number prefix'),
-('DEFAULT_CHALLAN_PREFIX', 'CHL',   'CHALLAN', 'Default challan number prefix');
+('MAX_STORES_PER_PLAN','10','PLAN','Max stores allowed'),
+('SUBSCRIPTION_GRACE_DAYS','7','PLAN','Grace period after expiry'),
+('PAYMENT_GATEWAY_ENABLED','false','PAYMENT','Global payment gateway toggle'),
+('SMS_GATEWAY_URL','','SMS','SMS gateway endpoint'),
+('DEFAULT_RECEIPT_PREFIX','RCP','RECEIPT','Default receipt number prefix'),
+('DEFAULT_CHALLAN_PREFIX','CHL','CHALLAN','Default challan number prefix');

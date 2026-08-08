@@ -133,7 +133,7 @@ const createStoreWithAdmin = async (data) => {
 
     // 4. Assign all permissions except stores/subscriptions management
     const [perms] = await conn.query(
-      "SELECT id FROM permissions WHERE NOT (resource = 'stores' AND action = 'manage') AND NOT (resource = 'subscriptions')"
+      "SELECT id FROM permissions WHERE resource NOT IN ('stores', 'subscriptions', 'system_settings')"
     );
     if (perms.length) {
       const vals = perms.map(p => [roleId, p.id]);
