@@ -4,27 +4,17 @@ const cors = require('cors');
 
 const app = express();
 
-const allowedOrigins = [
-  process.env.FRONTEND_URL,
-  'https://daanoday.com',
-  'https://www.daanoday.com',
-  'http://daanoday.com',
-  'http://localhost:5173',
-  'http://localhost:3000',
-].filter(Boolean);
-
+// CORS — allow all origins (tighten in production)
 app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'x-store-id'],
   credentials: true,
 }));
+
+// Handle preflight OPTIONS for all routes
+app.options('*', cors());
+
 app.use(express.json());
 
 // Auth (public)
