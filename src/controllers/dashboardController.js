@@ -7,7 +7,11 @@ const getStats = async (req, res) => {
 };
 
 const getRevenue = async (req, res) => {
-  try { success(res, await svc.getRevenueData(req.storeId, req.query.days || 30)); }
+  try { 
+    // req.query.days ko Number mein convert kiya
+    const days = Number(req.query.days) || 30;
+    success(res, await svc.getRevenueData(req.storeId, days)); 
+  }
   catch (e) { error(res, e.message); }
 };
 
@@ -22,9 +26,14 @@ const getMonthly = async (req, res) => {
 };
 
 const getRecent = async (req, res) => {
-  try { success(res, await svc.getRecentReceipts(req.storeId, req.query.limit || 10)); }
+  try { 
+    // req.query.limit ko Number mein convert kiya
+    const limit = Number(req.query.limit) || 10;
+    success(res, await svc.getRecentReceipts(req.storeId, limit)); 
+  }
   catch (e) { error(res, e.message); }
 };
+
 
 const getPendingApprovals = async (req, res) => {
   try { success(res, await svc.getPendingApprovals(req.storeId)); }
