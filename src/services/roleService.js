@@ -3,7 +3,11 @@ const auditLog = require('./auditLogService');
 
 const getAllRoles = async (storeId) => {
   const [rows] = await db.query(
-    "SELECT r.id, r.name, r.store_id FROM roles r WHERE (r.store_id = ? OR r.store_id IS NULL) AND r.name != 'SUPER_ADMIN'",
+    `SELECT r.id, r.name, r.store_id 
+     FROM roles r 
+     WHERE (r.store_id = ? OR r.store_id IS NULL) 
+     AND UPPER(TRIM(r.name)) != 'SUPER_ADMIN' 
+     ORDER BY r.name ASC`,
     [storeId]
   );
   return rows;
