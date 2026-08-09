@@ -1,4 +1,13 @@
 const db = require('../config/db');
+const XLSX = require('xlsx');
+
+// Build an .xlsx workbook buffer from an array of plain objects (keys = column headers)
+const toXlsxBuffer = (sheetName, rows) => {
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+  return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+};
 
 const getReceiptReport = async (storeId, filters = {}) => {
   let where = 'r.store_id = ?';
@@ -90,7 +99,7 @@ const getCustomerDonationHistory = async (storeId, customerId) => {
   return { customerId, stats: { totalDonated: Number(stats.totalDonated), receiptCount: stats.receiptCount }, receipts };
 };
 
-// Export receipt report as CSV string
+// Export receipt report as CSV string (used by Tally export)
 const exportReceiptsAsCsv = async (storeId, filters) => {
   const rows = await getReceiptReport(storeId, filters);
   const headers = ['Receipt No', 'Customer', 'Mobile', 'Account No', 'Amount', 'Payment Mode', 'State', 'Status', 'Created By', 'Date'];
@@ -102,26 +111,39 @@ const exportReceiptsAsCsv = async (storeId, filters) => {
   return [headers.join(','), ...lines].join('\n');
 };
 
-// Export financial report as CSV string
-const exportFinancialAsCsv = async (storeId, filters) => {
-  const report = await getFinancialReport(storeId, filters);
-  const lines = [
-    'Period,' + report.period.startDate + ' to ' + report.period.endDate,
-    'Total Receipts,' + report.receipts.total,
-    'Receipt Count,' + report.receipts.count,
-    'Total Challans,' + report.challans.total,
-    'Challan Count,' + report.challans.count,
-    'Net,' + report.net,
-    '',
-    'Payment Mode,Amount,Count',
-    ...report.byPaymentMode.map(r => `${r.payment_mode},${r.amount},${r.count}`),
-  ];
-  return lines.join('\n');
+// Export receipt report as a real .xlsx workbook (buffer)
+const exportReceiptsAsXlsx = async (storeId, filters) => {
+  const rows = await getReceiptReport(storeId, filters);
+  const sheetRows = rows.map(r => ({
+    'Receipt No': r.receipt_number, 'Customer': r.customer_name, 'Mobile': r.customer_mobile,
+    'Account No': r.account_number, 'Amount': Number(r.total_amount), 'Payment Mode': r.payment_mode,
+    'State': r.receipt_state, 'Status': r.status, 'Created By': r.created_by_name,
+    'Date': new Date(r.created_at).toLocaleDateString('en-IN'),
+  }));
+  return toXlsxBuffer('Receipts', sheetRows);
 };
 
+// Export financial report as a real .xlsx workbook (buffer)
+const exportFinancialAsXlsx = async (storeId, filters) => {
+  const report = await getFinancialReport(storeId, filters);
+  const worksheet = XLSX.utils.aoa_to_sheet([
+    ['Period', `${report.period.startDate} to ${report.period.endDate}`],
+    ['Total Receipts', report.receipts.total],
+    ['Receipt Count', report.receipts.count],
+    ['Total Challans', report.challans.total],
+    ['Challan Count', report.challans.count],
+    ['Net', report.net],
+    [],
+    ['Payment Mode', 'Amount', 'Count'],
+    ...report.byPaymentMode.map(r => [r.payment_mode, r.amount, r.count]),
+  ]);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Financial Summary');
+  return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+};
 
-// Export challans as CSV
-const exportChallansAsCsv = async (storeId, filters = {}) => {
+// Export challans as .xlsx
+const exportChallansAsXlsx = async (storeId, filters = {}) => {
   let where = 'ch.store_id = ?';
   const params = [storeId];
   if (filters.startDate) { where += ' AND DATE(ch.created_at) >= ?'; params.push(filters.startDate); }
@@ -134,16 +156,16 @@ const exportChallansAsCsv = async (storeId, filters = {}) => {
      JOIN users u ON u.id = ch.created_by
      WHERE ${where} ORDER BY ch.created_at DESC`, params
   );
-  const headers = ['Challan No','Supplier','Mobile','Amount','Payment Mode','Status','Created By','Date'];
-  const lines = rows.map(r => [
-    r.challan_number, r.supplier_name, r.supplier_mobile, r.total_amount,
-    r.payment_mode, r.status, r.created_by, new Date(r.created_at).toLocaleDateString('en-IN')
-  ].join(','));
-  return [headers.join(','), ...lines].join('\n');
+  const sheetRows = rows.map(r => ({
+    'Challan No': r.challan_number, 'Supplier': r.supplier_name, 'Mobile': r.supplier_mobile,
+    'Amount': Number(r.total_amount), 'Payment Mode': r.payment_mode, 'Status': r.status,
+    'Created By': r.created_by, 'Date': new Date(r.created_at).toLocaleDateString('en-IN'),
+  }));
+  return toXlsxBuffer('Challans', sheetRows);
 };
 
-// Export customers as CSV
-const exportCustomersAsCsv = async (storeId) => {
+// Export customers as .xlsx
+const exportCustomersAsXlsx = async (storeId) => {
   const [rows] = await db.query(
     `SELECT c.name, c.mobile, csa.account_number, csa.is_primary_store,
             COUNT(r.id) as total_receipts, COALESCE(SUM(r.total_amount),0) as total_donated
@@ -152,13 +174,15 @@ const exportCustomersAsCsv = async (storeId) => {
      LEFT JOIN receipts r ON r.customer_id = c.id AND r.store_id = ? AND r.receipt_state = 'APPROVED'
      GROUP BY c.id ORDER BY c.name`, [storeId, storeId]
   );
-  const headers = ['Name','Mobile','Account No','Total Receipts','Total Donated'];
-  const lines = rows.map(r => [r.name, r.mobile, r.account_number, r.total_receipts, r.total_donated].join(','));
-  return [headers.join(','), ...lines].join('\n');
+  const sheetRows = rows.map(r => ({
+    'Name': r.name, 'Mobile': r.mobile, 'Account No': r.account_number,
+    'Total Receipts': r.total_receipts, 'Total Donated': Number(r.total_donated),
+  }));
+  return toXlsxBuffer('Customers', sheetRows);
 };
 
-// Export suppliers as CSV
-const exportSuppliersAsCsv = async (storeId) => {
+// Export suppliers as .xlsx
+const exportSuppliersAsXlsx = async (storeId) => {
   const [rows] = await db.query(
     `SELECT s.name, s.mobile, s.email, s.address,
             COUNT(ch.id) as total_challans, COALESCE(SUM(ch.total_amount),0) as total_paid
@@ -167,13 +191,15 @@ const exportSuppliersAsCsv = async (storeId) => {
      WHERE s.store_id = ?
      GROUP BY s.id ORDER BY s.name`, [storeId, storeId]
   );
-  const headers = ['Name','Mobile','Email','Address','Total Challans','Total Paid'];
-  const lines = rows.map(r => [r.name, r.mobile, r.email||'', r.address||'', r.total_challans, r.total_paid].join(','));
-  return [headers.join(','), ...lines].join('\n');
+  const sheetRows = rows.map(r => ({
+    'Name': r.name, 'Mobile': r.mobile, 'Email': r.email || '', 'Address': r.address || '',
+    'Total Challans': r.total_challans, 'Total Paid': Number(r.total_paid),
+  }));
+  return toXlsxBuffer('Suppliers', sheetRows);
 };
 
-// Export transactions as CSV
-const exportTransactionsAsCsv = async (storeId, filters = {}) => {
+// Export transactions as .xlsx
+const exportTransactionsAsXlsx = async (storeId, filters = {}) => {
   let where = 't.store_id = ?';
   const params = [storeId];
   if (filters.startDate) { where += ' AND DATE(t.created_at) >= ?'; params.push(filters.startDate); }
@@ -189,12 +215,17 @@ const exportTransactionsAsCsv = async (storeId, filters = {}) => {
      LEFT JOIN suppliers s ON s.id = ch.supplier_id
      WHERE ${where} ORDER BY t.created_at DESC`, params
   );
-  const headers = ['ID','Type','Party','Amount','Payment Mode','Status','Date'];
-  const lines = rows.map(r => [
-    r.id, r.type, r.party_name||'', r.amount, r.payment_mode||'', r.status,
-    new Date(r.created_at).toLocaleDateString('en-IN')
-  ].join(','));
-  return [headers.join(','), ...lines].join('\n');
+  const sheetRows = rows.map(r => ({
+    'ID': r.id, 'Type': r.type, 'Party': r.party_name || '', 'Amount': Number(r.amount),
+    'Payment Mode': r.payment_mode || '', 'Status': r.status,
+    'Date': new Date(r.created_at).toLocaleDateString('en-IN'),
+  }));
+  return toXlsxBuffer('Transactions', sheetRows);
 };
 
-module.exports = { getReceiptReport, getFinancialReport, getCustomerDonationHistory, exportReceiptsAsCsv, exportFinancialAsCsv, exportChallansAsCsv, exportCustomersAsCsv, exportSuppliersAsCsv, exportTransactionsAsCsv };
+module.exports = {
+  getReceiptReport, getFinancialReport, getCustomerDonationHistory,
+  exportReceiptsAsCsv,
+  exportReceiptsAsXlsx, exportFinancialAsXlsx, exportChallansAsXlsx,
+  exportCustomersAsXlsx, exportSuppliersAsXlsx, exportTransactionsAsXlsx,
+};

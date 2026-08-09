@@ -144,12 +144,10 @@ const create = async (data, storeId, userId) => {
     }
 
     const txnStatus = status === 'PAID' ? 'SUCCESS' : 'INITIATED';
-    if (!isDue) {
-      await conn.query(
-        'INSERT INTO transactions (store_id, type, reference_id, amount, payment_mode, status) VALUES (?, ?, ?, ?, ?, ?)',
-        [storeId, 'RECEIPT', receiptId, data.totalAmount, paymentMode, txnStatus]
-      );
-    }
+    await conn.query(
+      'INSERT INTO transactions (store_id, type, reference_id, amount, payment_mode, status) VALUES (?, ?, ?, ?, ?, ?)',
+      [storeId, 'RECEIPT', receiptId, data.totalAmount, paymentMode, txnStatus]
+    );
 
     await conn.commit();
     // Notify store admins if pending approval
@@ -266,20 +264,29 @@ const changeState = async (id, storeId, userId, newState, note) => {
   return getById(id, storeId);
 };
 
-// Mark receipt as paid (UNPAID → PAID)
-const markPaid = async (id, storeId, userId) => {
+// Mark receipt as paid (UNPAID → PAID). paymentMode is required when the receipt
+// was created as "due" (no payment mode was known at creation time).
+const markPaid = async (id, storeId, userId, paymentMode) => {
   const [[receipt]] = await db.query(
     'SELECT * FROM receipts WHERE id = ? AND store_id = ?', [id, storeId]
   );
   if (!receipt) throw new Error('RECEIPT_NOT_FOUND');
   if (receipt.status === 'PAID') throw new Error('ALREADY_PAID');
+  if (!receipt.payment_mode && !paymentMode) throw new Error('PAYMENT_MODE_REQUIRED');
+
+  const finalMode = receipt.payment_mode || paymentMode;
+  const today = new Date().toISOString().split('T')[0];
 
   const conn = await db.getConnection();
   await conn.beginTransaction();
   try {
-    await conn.query("UPDATE receipts SET status = 'PAID' WHERE id = ?", [id]);
     await conn.query(
-      "UPDATE transactions SET status = 'SUCCESS' WHERE type = 'RECEIPT' AND reference_id = ?", [id]
+      "UPDATE receipts SET status = 'PAID', payment_mode = ?, payment_date = COALESCE(payment_date, ?) WHERE id = ?",
+      [finalMode, today, id]
+    );
+    await conn.query(
+      "UPDATE transactions SET status = 'SUCCESS', payment_mode = ? WHERE type = 'RECEIPT' AND reference_id = ?",
+      [finalMode, id]
     );
     await conn.commit();
     return getById(id, storeId);

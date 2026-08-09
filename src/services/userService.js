@@ -45,8 +45,13 @@ const createUser = async (userData, storeId, createdByUserId) => {
   );
   const userId = result.insertId;
 
-  // Assign role in this store
+  // Assign role in this store — validated: must belong to this store (or be global-but-not-SUPER_ADMIN)
   if (userData.roleId) {
+    const [[validRole]] = await db.query(
+      "SELECT id FROM roles WHERE id = ? AND (store_id = ? OR store_id IS NULL) AND name != 'SUPER_ADMIN'",
+      [userData.roleId, storeId]
+    );
+    if (!validRole) throw new Error('INVALID_ROLE_ASSIGNMENT');
     await db.query(
       'INSERT INTO user_roles (user_id, role_id, store_id) VALUES (?, ?, ?)',
       [userId, userData.roleId, storeId]
@@ -83,6 +88,15 @@ const toggleUserStatus = async (id) => {
 };
 
 const assignRoleInStore = async (userId, storeId, roleId, assignedByUserId) => {
+  // Security: only allow roles valid for this store and never SUPER_ADMIN — mirrors
+  // the same guard in roleService.assignRolesToUser. This endpoint must never be a
+  // bypass for privilege escalation.
+  const [[validRole]] = await db.query(
+    "SELECT id FROM roles WHERE id = ? AND (store_id = ? OR store_id IS NULL) AND name != 'SUPER_ADMIN'",
+    [roleId, storeId]
+  );
+  if (!validRole) throw new Error('INVALID_ROLE_ASSIGNMENT');
+
   await db.query('DELETE FROM user_roles WHERE user_id = ? AND store_id = ?', [userId, storeId]);
   await db.query('INSERT INTO user_roles (user_id, role_id, store_id) VALUES (?, ?, ?)', [userId, roleId, storeId]);
   await auditLog.log({ storeId, userId: assignedByUserId, action: 'ROLE_CHANGED', entityType: 'USER', entityId: userId, details: { roleId } });

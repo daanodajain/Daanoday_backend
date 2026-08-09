@@ -342,7 +342,7 @@ CREATE TABLE transactions (
   type                ENUM('RECEIPT','CHALLAN','ONLINE_PAYMENT','REFUND') NOT NULL,
   reference_id        BIGINT,
   amount              DECIMAL(12,2) NOT NULL,
-  payment_mode        ENUM('CASH','CHEQUE','ONLINE') NOT NULL,
+  payment_mode        ENUM('CASH','CHEQUE','ONLINE') NULL,
   status              ENUM('INITIATED','SUCCESS','FAILED') DEFAULT 'INITIATED',
   gateway_order_id    VARCHAR(100) DEFAULT NULL,
   gateway_payment_id  VARCHAR(100) DEFAULT NULL,

@@ -42,7 +42,7 @@ const stateChange = async (req, res) => {
 };
 
 const pay = async (req, res) => {
-  try { success(res, await svc.markPaid(req.params.id, req.storeId, req.user.id)); }
+  try { success(res, await svc.markPaid(req.params.id, req.storeId, req.user.id, req.body?.paymentMode)); }
   catch (e) { error(res, e.message); }
 };
 
