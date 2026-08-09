@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const { findOrCreateCustomerForStore } = require('./customerService');
+const notifSvc = require('./notificationService');
 
 // ── Number generation ────────────────────────────────────────
 const _generateReceiptNumber = async (storeId, conn) => {
@@ -92,7 +93,6 @@ const create = async (data, storeId, userId) => {
   const conn = await db.getConnection();
   await conn.beginTransaction();
   try {
-    // Resolve customer — create if needed, link staff user
     const { customerId } = await findOrCreateCustomerForStore(
       data.customerMobile, data.customerName, storeId, userId, conn
     );
@@ -102,24 +102,39 @@ const create = async (data, storeId, userId) => {
       [storeId]
     );
 
-    const needsApproval = data.paymentMode === 'CASH'
-      && settings
-      && !settings.auto_approve_cash
-      && Number(data.totalAmount) > Number(settings.cash_approval_limit || 0);
+    const isDue = data.isDue === true || data.isDue === 'true';
 
-    const receiptState = needsApproval ? 'PENDING_APPROVAL' : 'APPROVED';
-    const status = needsApproval ? 'UNPAID' : 'PAID';
+    // Due receipt — always PENDING, UNPAID, no payment mode needed
+    let receiptState, status;
+    if (isDue) {
+      receiptState = 'APPROVED'; // approved but unpaid
+      status = 'UNPAID';
+    } else {
+      const needsApproval = data.paymentMode === 'CASH'
+        && settings
+        && !settings.auto_approve_cash
+        && Number(data.totalAmount) > Number(settings.cash_approval_limit || 0);
+      receiptState = needsApproval ? 'PENDING_APPROVAL' : 'APPROVED';
+      status = needsApproval ? 'UNPAID' : 'PAID';
+    }
 
     const receiptNumber = await _generateReceiptNumber(storeId, conn);
+    const receiptDate = data.receiptDate || new Date().toISOString().split('T')[0];
+    const paymentDate = isDue ? null : (data.paymentDate || receiptDate);
+    const paymentMode = isDue ? null : (data.paymentMode || 'CASH');
 
     const [result] = await conn.query(
-      `INSERT INTO receipts (store_id, receipt_number, customer_id, total_amount, payment_mode, receipt_state, status, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [storeId, receiptNumber, customerId, data.totalAmount, data.paymentMode, receiptState, status, userId]
+      `INSERT INTO receipts
+        (store_id, receipt_number, customer_id, total_amount, payment_mode,
+         receipt_date, payment_date, is_due, remarks,
+         receipt_state, status, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [storeId, receiptNumber, customerId, data.totalAmount, paymentMode,
+       receiptDate, paymentDate, isDue, data.remarks || null,
+       receiptState, status, userId]
     );
     const receiptId = result.insertId;
 
-    // Insert particulars
     if (data.particulars?.length) {
       const vals = data.particulars.map(p => [receiptId, p.particularId, p.particularName, p.amount]);
       await conn.query(
@@ -128,14 +143,33 @@ const create = async (data, storeId, userId) => {
       );
     }
 
-    // Create transaction record
-    const txnStatus = needsApproval ? 'INITIATED' : 'SUCCESS';
-    await conn.query(
-      'INSERT INTO transactions (store_id, type, reference_id, amount, payment_mode, status) VALUES (?, ?, ?, ?, ?, ?)',
-      [storeId, 'RECEIPT', receiptId, data.totalAmount, data.paymentMode, txnStatus]
-    );
+    const txnStatus = status === 'PAID' ? 'SUCCESS' : 'INITIATED';
+    if (!isDue) {
+      await conn.query(
+        'INSERT INTO transactions (store_id, type, reference_id, amount, payment_mode, status) VALUES (?, ?, ?, ?, ?, ?)',
+        [storeId, 'RECEIPT', receiptId, data.totalAmount, paymentMode, txnStatus]
+      );
+    }
 
     await conn.commit();
+    // Notify store admins if pending approval
+    if (receiptState === 'PENDING_APPROVAL') {
+      try {
+        const [admins] = await db.query(
+          `SELECT u.id FROM users u JOIN user_roles ur ON ur.user_id = u.id
+           JOIN roles r ON r.id = ur.role_id
+           WHERE ur.store_id = ? AND r.name IN ('STORE_ADMIN','SUB_ADMIN') AND u.id != ?`,
+          [storeId, userId]
+        );
+        for (const admin of admins) {
+          await notifSvc.create(admin.id, storeId, {
+            type: 'RECEIPT_APPROVAL',
+            message: `New receipt ${receiptNumber} of ₹${data.totalAmount} requires approval`,
+            referenceId: receiptId, referenceType: 'RECEIPT'
+          });
+        }
+      } catch(e) { /* notification failure should not block receipt creation */ }
+    }
     return getById(receiptId, storeId);
   } catch (e) {
     await conn.rollback();
@@ -167,6 +201,14 @@ const approveReceipt = async (id, storeId, userId, note) => {
       "UPDATE transactions SET status = 'SUCCESS' WHERE type = 'RECEIPT' AND reference_id = ?", [id]
     );
     await conn.commit();
+    // Notify receipt creator
+    try {
+      await notifSvc.create(receipt.created_by, storeId, {
+        type: 'SUCCESS',
+        message: `Receipt ${receipt.receipt_number} of ₹${receipt.total_amount} has been approved`,
+        referenceId: id, referenceType: 'RECEIPT'
+      });
+    } catch(e) {}
     return getById(id, storeId);
   } catch (e) {
     await conn.rollback();

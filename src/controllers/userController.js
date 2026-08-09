@@ -2,7 +2,7 @@ const svc = require('../services/userService');
 const { success, error } = require('../utils/response');
 
 const getAll = async (req, res) => {
-  try { success(res, await svc.getAllUsers(req.storeId)); }
+  try { success(res, await svc.getAllUsers(req.storeId, req.user.id)); }
   catch (e) { error(res, e.message); }
 };
 

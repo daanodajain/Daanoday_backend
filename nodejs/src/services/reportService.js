@@ -119,4 +119,82 @@ const exportFinancialAsCsv = async (storeId, filters) => {
   return lines.join('\n');
 };
 
-module.exports = { getReceiptReport, getFinancialReport, getCustomerDonationHistory, exportReceiptsAsCsv, exportFinancialAsCsv };
+
+// Export challans as CSV
+const exportChallansAsCsv = async (storeId, filters = {}) => {
+  let where = 'ch.store_id = ?';
+  const params = [storeId];
+  if (filters.startDate) { where += ' AND DATE(ch.created_at) >= ?'; params.push(filters.startDate); }
+  if (filters.endDate)   { where += ' AND DATE(ch.created_at) <= ?'; params.push(filters.endDate); }
+  const [rows] = await db.query(
+    `SELECT ch.challan_number, s.name as supplier_name, s.mobile as supplier_mobile,
+            ch.total_amount, ch.payment_mode, ch.status, u.name as created_by, ch.created_at
+     FROM challans ch
+     JOIN suppliers s ON s.id = ch.supplier_id
+     JOIN users u ON u.id = ch.created_by
+     WHERE ${where} ORDER BY ch.created_at DESC`, params
+  );
+  const headers = ['Challan No','Supplier','Mobile','Amount','Payment Mode','Status','Created By','Date'];
+  const lines = rows.map(r => [
+    r.challan_number, r.supplier_name, r.supplier_mobile, r.total_amount,
+    r.payment_mode, r.status, r.created_by, new Date(r.created_at).toLocaleDateString('en-IN')
+  ].join(','));
+  return [headers.join(','), ...lines].join('\n');
+};
+
+// Export customers as CSV
+const exportCustomersAsCsv = async (storeId) => {
+  const [rows] = await db.query(
+    `SELECT c.name, c.mobile, csa.account_number, csa.is_primary_store,
+            COUNT(r.id) as total_receipts, COALESCE(SUM(r.total_amount),0) as total_donated
+     FROM customers c
+     JOIN customer_store_access csa ON csa.customer_id = c.id AND csa.store_id = ?
+     LEFT JOIN receipts r ON r.customer_id = c.id AND r.store_id = ? AND r.receipt_state = 'APPROVED'
+     GROUP BY c.id ORDER BY c.name`, [storeId, storeId]
+  );
+  const headers = ['Name','Mobile','Account No','Total Receipts','Total Donated'];
+  const lines = rows.map(r => [r.name, r.mobile, r.account_number, r.total_receipts, r.total_donated].join(','));
+  return [headers.join(','), ...lines].join('\n');
+};
+
+// Export suppliers as CSV
+const exportSuppliersAsCsv = async (storeId) => {
+  const [rows] = await db.query(
+    `SELECT s.name, s.mobile, s.email, s.address,
+            COUNT(ch.id) as total_challans, COALESCE(SUM(ch.total_amount),0) as total_paid
+     FROM suppliers s
+     LEFT JOIN challans ch ON ch.supplier_id = s.id AND ch.store_id = ?
+     WHERE s.store_id = ?
+     GROUP BY s.id ORDER BY s.name`, [storeId, storeId]
+  );
+  const headers = ['Name','Mobile','Email','Address','Total Challans','Total Paid'];
+  const lines = rows.map(r => [r.name, r.mobile, r.email||'', r.address||'', r.total_challans, r.total_paid].join(','));
+  return [headers.join(','), ...lines].join('\n');
+};
+
+// Export transactions as CSV
+const exportTransactionsAsCsv = async (storeId, filters = {}) => {
+  let where = 't.store_id = ?';
+  const params = [storeId];
+  if (filters.startDate) { where += ' AND DATE(t.created_at) >= ?'; params.push(filters.startDate); }
+  if (filters.endDate)   { where += ' AND DATE(t.created_at) <= ?'; params.push(filters.endDate); }
+  const [rows] = await db.query(
+    `SELECT t.id, t.type, t.amount, t.payment_mode, t.status,
+            CASE WHEN t.type='RECEIPT' THEN c.name ELSE s.name END as party_name,
+            t.created_at
+     FROM transactions t
+     LEFT JOIN receipts r ON r.id = t.reference_id AND t.type = 'RECEIPT'
+     LEFT JOIN customers c ON c.id = r.customer_id
+     LEFT JOIN challans ch ON ch.id = t.reference_id AND t.type = 'CHALLAN'
+     LEFT JOIN suppliers s ON s.id = ch.supplier_id
+     WHERE ${where} ORDER BY t.created_at DESC`, params
+  );
+  const headers = ['ID','Type','Party','Amount','Payment Mode','Status','Date'];
+  const lines = rows.map(r => [
+    r.id, r.type, r.party_name||'', r.amount, r.payment_mode||'', r.status,
+    new Date(r.created_at).toLocaleDateString('en-IN')
+  ].join(','));
+  return [headers.join(','), ...lines].join('\n');
+};
+
+module.exports = { getReceiptReport, getFinancialReport, getCustomerDonationHistory, exportReceiptsAsCsv, exportFinancialAsCsv, exportChallansAsCsv, exportCustomersAsCsv, exportSuppliersAsCsv, exportTransactionsAsCsv };

@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const { findOrCreateCustomerForStore } = require('./customerService');
+const notifSvc = require('./notificationService');
 
 // ── Number generation ────────────────────────────────────────
 const _generateReceiptNumber = async (storeId, conn) => {
@@ -151,6 +152,24 @@ const create = async (data, storeId, userId) => {
     }
 
     await conn.commit();
+    // Notify store admins if pending approval
+    if (receiptState === 'PENDING_APPROVAL') {
+      try {
+        const [admins] = await db.query(
+          `SELECT u.id FROM users u JOIN user_roles ur ON ur.user_id = u.id
+           JOIN roles r ON r.id = ur.role_id
+           WHERE ur.store_id = ? AND r.name IN ('STORE_ADMIN','SUB_ADMIN') AND u.id != ?`,
+          [storeId, userId]
+        );
+        for (const admin of admins) {
+          await notifSvc.create(admin.id, storeId, {
+            type: 'RECEIPT_APPROVAL',
+            message: `New receipt ${receiptNumber} of ₹${data.totalAmount} requires approval`,
+            referenceId: receiptId, referenceType: 'RECEIPT'
+          });
+        }
+      } catch(e) { /* notification failure should not block receipt creation */ }
+    }
     return getById(receiptId, storeId);
   } catch (e) {
     await conn.rollback();
@@ -182,6 +201,14 @@ const approveReceipt = async (id, storeId, userId, note) => {
       "UPDATE transactions SET status = 'SUCCESS' WHERE type = 'RECEIPT' AND reference_id = ?", [id]
     );
     await conn.commit();
+    // Notify receipt creator
+    try {
+      await notifSvc.create(receipt.created_by, storeId, {
+        type: 'SUCCESS',
+        message: `Receipt ${receipt.receipt_number} of ₹${receipt.total_amount} has been approved`,
+        referenceId: id, referenceType: 'RECEIPT'
+      });
+    } catch(e) {}
     return getById(id, storeId);
   } catch (e) {
     await conn.rollback();

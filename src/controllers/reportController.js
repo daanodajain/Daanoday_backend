@@ -51,4 +51,41 @@ const importData = async (req, res) => {
   } catch (e) { error(res, e.message); }
 };
 
-module.exports = { getReceipts, getFinancial, getCustomerHistory, exportReceiptsExcel, exportFinancialExcel, exportReceiptsTally, importData };
+
+const exportChallans = async (req, res) => {
+  try {
+    const csv = await svc.exportChallansAsCsv(req.storeId, req.query);
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="challans.csv"');
+    res.send(csv);
+  } catch (e) { error(res, e.message); }
+};
+
+const exportCustomers = async (req, res) => {
+  try {
+    const csv = await svc.exportCustomersAsCsv(req.storeId);
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="customers.csv"');
+    res.send(csv);
+  } catch (e) { error(res, e.message); }
+};
+
+const exportSuppliers = async (req, res) => {
+  try {
+    const csv = await svc.exportSuppliersAsCsv(req.storeId);
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="suppliers.csv"');
+    res.send(csv);
+  } catch (e) { error(res, e.message); }
+};
+
+const exportTransactions = async (req, res) => {
+  try {
+    const csv = await svc.exportTransactionsAsCsv(req.storeId, req.query);
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="transactions.csv"');
+    res.send(csv);
+  } catch (e) { error(res, e.message); }
+};
+
+module.exports = { getReceipts, getFinancial, getCustomerHistory, exportReceiptsExcel, exportFinancialExcel, exportReceiptsTally, exportChallans, exportCustomers, exportSuppliers, exportTransactions, importData };

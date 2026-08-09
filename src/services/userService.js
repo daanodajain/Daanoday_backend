@@ -2,15 +2,16 @@ const db = require('../config/db');
 const bcrypt = require('bcryptjs');
 const auditLog = require('./auditLogService');
 
-const getAllUsers = async (storeId) => {
+const getAllUsers = async (storeId, currentUserId) => {
   const [rows] = await db.query(
     `SELECT DISTINCT u.id, u.name, u.email, u.mobile, u.active, u.first_login, u.created_at,
             r.name as role_name
      FROM users u
      JOIN user_roles ur ON ur.user_id = u.id AND ur.store_id = ?
      JOIN roles r ON r.id = ur.role_id
+     WHERE u.id != ? AND r.name != 'SUPER_ADMIN'
      ORDER BY u.name`,
-    [storeId]
+    [storeId, currentUserId || 0]
   );
   return rows;
 };
