@@ -44,7 +44,7 @@ const createRole = async (storeId, data, userId) => {
   }
 
   await auditLog.log({ storeId, userId, action: 'ROLE_CREATED', entityType: 'ROLE', entityId: result.insertId });
-  return getRoleById(result.insertId, storeId);
+  return { id: result.insertId, name: verify.name, store_id: storeId };
 };
 
 const updateRole = async (id, storeId, data, userId) => {
@@ -69,7 +69,7 @@ const updateRole = async (id, storeId, data, userId) => {
   }
 
   await auditLog.log({ storeId, userId, action: 'ROLE_UPDATED', entityType: 'ROLE', entityId: id });
-  return getRoleById(id, storeId);
+  return { id: Number(id), name: verify.name, store_id: storeId };
 };
 
 const deleteRole = async (id, storeId, userId) => {
