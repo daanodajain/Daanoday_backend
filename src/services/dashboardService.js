@@ -42,13 +42,14 @@ const getStats = async (storeId) => {
 };
 
 const getRevenueData = async (storeId, days = 30) => {
+  const numDays = parseInt(days) || 30; // Pukka kiya ki ye number hai
   const [rows] = await db.query(
     `SELECT DATE(created_at) as date, COALESCE(SUM(total_amount), 0) as amount
      FROM receipts
      WHERE store_id = ? AND receipt_state = 'APPROVED'
        AND DATE(created_at) >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
      GROUP BY DATE(created_at) ORDER BY date ASC`,
-    [storeId, days]
+    [storeId, numDays]
   );
   const result = [];
   for (let i = days - 1; i >= 0; i--) {
