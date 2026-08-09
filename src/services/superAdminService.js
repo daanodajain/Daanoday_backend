@@ -82,7 +82,9 @@ const suspendSubscription = async (storeId, reason, userId) => {
 const getAllStoresWithSubscription = async () => {
   const [rows] = await db.query(
     `SELECT s.id, s.name, s.address, s.city, s.state, s.contact, s.email,
-            s.subscription_status, s.online_payment_enabled, s.active, s.created_at,
+            s.subscription_status as subscriptionStatus,
+            s.online_payment_enabled as onlinePaymentEnabled,
+            s.active, s.created_at,
             u.name as admin_name, u.mobile as admin_mobile, u.email as admin_email,
             sub.plan_type, sub.status as sub_status, sub.end_date as subscriptionExpiresAt
      FROM stores s
