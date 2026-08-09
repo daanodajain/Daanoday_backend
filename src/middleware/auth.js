@@ -73,4 +73,18 @@ const requirePermission = (resource, action) => async (req, res, next) => {
   next();
 };
 
-module.exports = { authenticate, storeContext, requirePermission };
+// Standalone super-admin gate for routes that have no store in scope
+// (e.g. /super-admin/*). Does NOT depend on storeContext running first.
+const requireSuperAdmin = async (req, res, next) => {
+  const [[superAdminRole]] = await db.query(
+    `SELECT r.name FROM user_roles ur
+     JOIN roles r ON r.id = ur.role_id
+     WHERE ur.user_id = ? AND r.name = 'SUPER_ADMIN' AND r.store_id IS NULL`,
+    [req.user.id]
+  );
+  if (!superAdminRole) return error(res, 'FORBIDDEN', 403);
+  req.isSuperAdmin = true;
+  next();
+};
+
+module.exports = { authenticate, storeContext, requirePermission, requireSuperAdmin };

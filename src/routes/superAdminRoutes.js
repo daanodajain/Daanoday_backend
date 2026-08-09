@@ -1,8 +1,8 @@
 const router = require('express').Router();
 const ctrl = require('../controllers/superAdminController');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, requireSuperAdmin } = require('../middleware/auth');
 
-router.use(authenticate);
+router.use(authenticate, requireSuperAdmin);
 
 // Stores CRUD
 router.get('/stores', ctrl.getAllStores);
