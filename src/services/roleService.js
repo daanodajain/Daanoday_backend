@@ -102,12 +102,14 @@ const assignPermissions = async (roleId, storeId, permissionIds, assignedByUserI
   const [[role]] = await db.query('SELECT id FROM roles WHERE id = ? AND store_id = ?', [roleId, storeId]);
   if (!role) throw new Error('ROLE_NOT_FOUND');
 
+  const requestedIds = (permissionIds || []).map(id => Number(id)).sort((a, b) => a - b);
+
   const conn = await db.getConnection();
   await conn.beginTransaction();
   try {
     await conn.query('DELETE FROM role_permissions WHERE role_id = ?', [roleId]);
-    if (permissionIds.length) {
-      const vals = permissionIds.map(pid => [roleId, pid]);
+    if (requestedIds.length) {
+      const vals = requestedIds.map(pid => [roleId, pid]);
       await conn.query('INSERT INTO role_permissions (role_id, permission_id) VALUES ?', [vals]);
     }
     await conn.commit();
@@ -117,7 +119,21 @@ const assignPermissions = async (roleId, storeId, permissionIds, assignedByUserI
   } finally {
     conn.release();
   }
+
+  // Self-check: immediately re-read what actually landed, same pattern as
+  // createRole/updateRole - surface an exact mismatch instead of a false success.
+  const [verifyRows] = await db.query('SELECT permission_id FROM role_permissions WHERE role_id = ?', [roleId]);
+  const actualIds = verifyRows.map(r => r.permission_id).sort((a, b) => a - b);
+  const matches = requestedIds.length === actualIds.length &&
+    requestedIds.every((id, i) => id === actualIds[i]);
+  if (!matches) {
+    throw new Error(
+      `SAVE_MISMATCH: requestedIds=[${requestedIds.join(',')}] actualDbIds=[${actualIds.join(',')}]`
+    );
+  }
+
   await auditLog.log({ storeId, userId: assignedByUserId, action: 'ROLE_PERMISSIONS_UPDATED', entityType: 'ROLE', entityId: roleId });
+  return actualIds;
 };
 
 // Assign multiple roles to a user in a store

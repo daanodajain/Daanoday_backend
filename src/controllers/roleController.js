@@ -45,8 +45,8 @@ const getRolePermissions = async (req, res) => {
 
 const assignPermissions = async (req, res) => {
   try {
-    await svc.assignPermissions(req.params.id, req.storeId, req.body.permissionIds, req.user.id);
-    success(res, { message: 'Permissions updated' });
+    const savedIds = await svc.assignPermissions(req.params.id, req.storeId, req.body.permissionIds, req.user.id);
+    success(res, { message: 'Permissions updated', permissionIds: savedIds });
   } catch (e) { error(res, e.message); }
 };
 
