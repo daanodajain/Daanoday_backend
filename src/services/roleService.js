@@ -34,6 +34,15 @@ const createRole = async (storeId, data, userId) => {
     'INSERT INTO roles (store_id, name) VALUES (?, ?)',
     [storeId, name]
   );
+
+  // Self-check: immediately re-read what actually landed in the row.
+  const [[verify]] = await db.query('SELECT name FROM roles WHERE id = ?', [result.insertId]);
+  if (!verify || verify.name !== name) {
+    throw new Error(
+      `SAVE_MISMATCH: sent="${name}" insertId=${result.insertId} actualDbValue="${verify ? verify.name : 'ROW_MISSING'}"`
+    );
+  }
+
   await auditLog.log({ storeId, userId, action: 'ROLE_CREATED', entityType: 'ROLE', entityId: result.insertId });
   return getRoleById(result.insertId, storeId);
 };
