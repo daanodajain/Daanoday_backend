@@ -25,24 +25,28 @@ const getRoleById = async (id, storeId) => {
 const RESERVED_ROLE_NAMES = ['SUPER_ADMIN'];
 
 const createRole = async (storeId, data, userId) => {
-  if (RESERVED_ROLE_NAMES.includes((data.name || '').trim().toUpperCase())) {
+  const name = (data.name || '').trim();
+  if (!name) throw new Error('ROLE_NAME_REQUIRED');
+  if (RESERVED_ROLE_NAMES.includes(name.toUpperCase())) {
     throw new Error('RESERVED_ROLE_NAME');
   }
   const [result] = await db.query(
     'INSERT INTO roles (store_id, name) VALUES (?, ?)',
-    [storeId, data.name]
+    [storeId, name]
   );
   await auditLog.log({ storeId, userId, action: 'ROLE_CREATED', entityType: 'ROLE', entityId: result.insertId });
   return getRoleById(result.insertId, storeId);
 };
 
 const updateRole = async (id, storeId, data, userId) => {
-  if (RESERVED_ROLE_NAMES.includes((data.name || '').trim().toUpperCase())) {
+  const name = (data.name || '').trim();
+  if (!name) throw new Error('ROLE_NAME_REQUIRED');
+  if (RESERVED_ROLE_NAMES.includes(name.toUpperCase())) {
     throw new Error('RESERVED_ROLE_NAME');
   }
   const [[role]] = await db.query('SELECT id FROM roles WHERE id = ? AND store_id = ?', [id, storeId]);
   if (!role) throw new Error('ROLE_NOT_FOUND');
-  await db.query('UPDATE roles SET name = ? WHERE id = ?', [data.name, id]);
+  await db.query('UPDATE roles SET name = ? WHERE id = ?', [name, id]);
   await auditLog.log({ storeId, userId, action: 'ROLE_UPDATED', entityType: 'ROLE', entityId: id });
   return getRoleById(id, storeId);
 };
