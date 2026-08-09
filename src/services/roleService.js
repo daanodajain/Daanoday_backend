@@ -46,7 +46,19 @@ const updateRole = async (id, storeId, data, userId) => {
   }
   const [[role]] = await db.query('SELECT id FROM roles WHERE id = ? AND store_id = ?', [id, storeId]);
   if (!role) throw new Error('ROLE_NOT_FOUND');
-  await db.query('UPDATE roles SET name = ? WHERE id = ?', [name, id]);
+
+  const [updateResult] = await db.query('UPDATE roles SET name = ? WHERE id = ?', [name, id]);
+
+  // Self-check: immediately re-read what actually landed in the row.
+  // If it doesn't match what we just wrote, surface the exact mismatch
+  // instead of silently returning something wrong.
+  const [[verify]] = await db.query('SELECT name FROM roles WHERE id = ?', [id]);
+  if (!verify || verify.name !== name) {
+    throw new Error(
+      `SAVE_MISMATCH: sent="${name}" affectedRows=${updateResult.affectedRows} actualDbValue="${verify ? verify.name : 'ROW_MISSING'}"`
+    );
+  }
+
   await auditLog.log({ storeId, userId, action: 'ROLE_UPDATED', entityType: 'ROLE', entityId: id });
   return getRoleById(id, storeId);
 };

@@ -17,8 +17,15 @@ const create = async (req, res) => {
 };
 
 const update = async (req, res) => {
-  try { success(res, await svc.updateRole(req.params.id, req.storeId, req.body, req.user.id)); }
-  catch (e) { error(res, e.message); }
+  console.log('[ROLE UPDATE DEBUG] params.id:', req.params.id, 'body:', JSON.stringify(req.body), 'storeId:', req.storeId);
+  try {
+    const result = await svc.updateRole(req.params.id, req.storeId, req.body, req.user.id);
+    console.log('[ROLE UPDATE DEBUG] result:', JSON.stringify(result));
+    success(res, result);
+  } catch (e) {
+    console.log('[ROLE UPDATE DEBUG] error:', e.message);
+    error(res, e.message);
+  }
 };
 
 const remove = async (req, res) => {
