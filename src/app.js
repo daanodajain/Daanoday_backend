@@ -55,7 +55,10 @@ app.use('/api/audit-logs', auditRoutes);
 app.use('/api/audit',      auditRoutes);
 
 // Health check
-app.get('/api/health', (req, res) => res.json({ status: 'UP' }));
+app.get('/api/health', (req, res) => {
+  const { success } = require('./utils/response');
+  success(res, { status: 'UP' });
+});
 
 // Global error handler
 app.use((err, req, res, next) => {
