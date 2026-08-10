@@ -17,6 +17,15 @@ app.options('*', cors());
 
 app.use(express.json());
 
+// Never let a CDN/reverse-proxy cache API responses - this is a dynamic
+// API, every response must always reflect the current DB state.
+app.use('/api', (req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  next();
+});
+
 // Auth (public)
 app.use('/api/auth',          require('./routes/authRoutes'));
 app.use('/api/customer-auth', require('./routes/customerAuthRoutes'));
