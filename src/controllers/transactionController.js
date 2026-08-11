@@ -2,7 +2,7 @@ const svc = require('../services/transactionService');
 const { success, error } = require('../utils/response');
 
 const getAll = async (req, res) => {
-  try { res.json(success(await svc.getAll(req.storeId))); }
+  try { res.json(success(await svc.getAll(req.storeId, req.query))); }
   catch (e) { error(res, e.message, 400); }
 };
 

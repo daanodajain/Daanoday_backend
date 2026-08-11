@@ -80,19 +80,44 @@ const getCustomerById = async (id, storeId) => {
 };
 
 const createCustomer = async (data, storeId, callerUserId = null) => {
-  const { customerId, accountNumber } = await findOrCreateCustomerForStore(
+  const { customerId } = await findOrCreateCustomerForStore(
     data.mobile, data.name, storeId, callerUserId
   );
+  // Update extra fields if provided
+  const fields = [];
+  const vals = [];
+  if (data.email !== undefined)   { fields.push('email = ?');   vals.push(data.email || null); }
+  if (data.address !== undefined) { fields.push('address = ?'); vals.push(data.address || null); }
+  if (data.password) {
+    const bcrypt = require('bcryptjs');
+    const hash = await bcrypt.hash(data.password, 10);
+    fields.push('password_hash = ?', 'first_login = FALSE');
+    vals.push(hash);
+  }
+  if (fields.length) {
+    vals.push(customerId);
+    await db.query(`UPDATE customers SET ${fields.join(', ')} WHERE id = ?`, vals);
+  }
   return getCustomerById(customerId, storeId);
 };
 
 const updateCustomer = async (id, storeId, data) => {
-  // Verify customer belongs to this store
   const [[access]] = await db.query(
     'SELECT id FROM customer_store_access WHERE customer_id = ? AND store_id = ?', [id, storeId]
   );
   if (!access) throw new Error('CUSTOMER_NOT_FOUND');
-  await db.query('UPDATE customers SET name = ?, mobile = ? WHERE id = ?', [data.name, data.mobile, id]);
+  const fields = ['name = ?', 'mobile = ?'];
+  const vals = [data.name, data.mobile];
+  if (data.email !== undefined)   { fields.push('email = ?');   vals.push(data.email || null); }
+  if (data.address !== undefined) { fields.push('address = ?'); vals.push(data.address || null); }
+  if (data.password) {
+    const bcrypt = require('bcryptjs');
+    const hash = await bcrypt.hash(data.password, 10);
+    fields.push('password_hash = ?', 'first_login = FALSE');
+    vals.push(hash);
+  }
+  vals.push(id);
+  await db.query(`UPDATE customers SET ${fields.join(', ')} WHERE id = ?`, vals);
   return getCustomerById(id, storeId);
 };
 

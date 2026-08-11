@@ -1,6 +1,9 @@
 const router = require('express').Router();
+const multer = require('multer');
 const ctrl = require('../controllers/reportController');
 const { authenticate, storeContext, requirePermission } = require('../middleware/auth');
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 router.use(authenticate, storeContext);
 
@@ -16,6 +19,7 @@ router.get('/export/challans', requirePermission('reports', 'export'), ctrl.expo
 router.get('/export/customers', requirePermission('reports', 'export'), ctrl.exportCustomers);
 router.get('/export/suppliers', requirePermission('reports', 'export'), ctrl.exportSuppliers);
 router.get('/export/transactions', requirePermission('reports', 'export'), ctrl.exportTransactions);
-router.post('/import/:type', requirePermission('reports', 'import'), ctrl.importData);
+router.get('/import/template/:type', requirePermission('reports', 'import'), ctrl.downloadTemplate);
+router.post('/import/:type', requirePermission('reports', 'import'), upload.single('file'), ctrl.importData);
 
 module.exports = router;

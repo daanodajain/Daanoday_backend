@@ -223,9 +223,91 @@ const exportTransactionsAsXlsx = async (storeId, filters = {}) => {
   return toXlsxBuffer('Transactions', sheetRows);
 };
 
+// ── Import templates ────────────────────────────────────────
+const TEMPLATES = {
+  customers:  [{ Name: 'Ram Sharma', Mobile: '9876543210', Email: 'ram@example.com', Address: 'Indore MP', Password: 'pass1234' }],
+  suppliers:  [{ 'Company Name': 'ABC Traders', 'Contact Person': 'Suresh', Phone: '9876543210', Email: 'abc@example.com', Address: 'Indore MP' }],
+  particulars:[{ Name: 'Daan', Type: 'RECEIPT' }, { Name: 'Pooja Samagri', Type: 'CHALLAN' }],
+};
+
+const getImportTemplate = (type) => {
+  const data = TEMPLATES[type];
+  if (!data) throw new Error(`INVALID_IMPORT_TYPE: ${type}`);
+  const buffer = toXlsxBuffer(type, data);
+  return { buffer, filename: `${type}-import-template.xlsx` };
+};
+
+// ── Import data ──────────────────────────────────────────────
+const importData = async (type, file, storeId, userId) => {
+  if (!file) throw new Error('FILE_REQUIRED');
+  const workbook = XLSX.read(file.buffer, { type: 'buffer' });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(sheet);
+  if (!rows.length) throw new Error('EMPTY_FILE');
+
+  let inserted = 0, skipped = 0;
+
+  if (type === 'customers') {
+    const { findOrCreateCustomerForStore } = require('./customerService');
+    const bcrypt = require('bcryptjs');
+    for (const row of rows) {
+      const name   = (row['Name']   || '').trim();
+      const mobile = (row['Mobile'] || '').toString().trim();
+      if (!name || !mobile) { skipped++; continue; }
+      try {
+        const { customerId } = await findOrCreateCustomerForStore(mobile, name, storeId, userId);
+        const updates = [];
+        const vals = [];
+        if (row['Email'])   { updates.push('email = ?');   vals.push(row['Email']); }
+        if (row['Address']) { updates.push('address = ?'); vals.push(row['Address']); }
+        if (row['Password']) {
+          const hash = await bcrypt.hash(row['Password'].toString(), 10);
+          updates.push('password_hash = ?', 'first_login = FALSE');
+          vals.push(hash);
+        }
+        if (updates.length) {
+          vals.push(customerId);
+          await db.query(`UPDATE customers SET ${updates.join(', ')} WHERE id = ?`, vals);
+        }
+        inserted++;
+      } catch { skipped++; }
+    }
+  } else if (type === 'suppliers') {
+    for (const row of rows) {
+      const name = (row['Company Name'] || '').trim();
+      if (!name) { skipped++; continue; }
+      try {
+        await db.query(
+          'INSERT INTO suppliers (store_id, name, mobile, contact_person, email, address, active) VALUES (?, ?, ?, ?, ?, ?, TRUE)',
+          [storeId, name, row['Phone'] || null, row['Contact Person'] || null, row['Email'] || null, row['Address'] || null]
+        );
+        inserted++;
+      } catch { skipped++; }
+    }
+  } else if (type === 'particulars') {
+    for (const row of rows) {
+      const name = (row['Name'] || '').trim();
+      const type_ = (row['Type'] || '').toUpperCase();
+      if (!name || !['RECEIPT', 'CHALLAN'].includes(type_)) { skipped++; continue; }
+      try {
+        await db.query(
+          'INSERT INTO particulars (store_id, type, name, active) VALUES (?, ?, ?, TRUE)',
+          [storeId, type_, name]
+        );
+        inserted++;
+      } catch { skipped++; }
+    }
+  } else {
+    throw new Error(`INVALID_IMPORT_TYPE: ${type}`);
+  }
+
+  return { inserted, skipped, total: rows.length };
+};
+
 module.exports = {
   getReceiptReport, getFinancialReport, getCustomerDonationHistory,
   exportReceiptsAsCsv,
   exportReceiptsAsXlsx, exportFinancialAsXlsx, exportChallansAsXlsx,
   exportCustomersAsXlsx, exportSuppliersAsXlsx, exportTransactionsAsXlsx,
+  getImportTemplate, importData,
 };

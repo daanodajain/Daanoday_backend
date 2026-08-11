@@ -47,10 +47,21 @@ const exportReceiptsTally = async (req, res) => {
   } catch (e) { error(res, e.message); }
 };
 
-// Import — placeholder; actual file parsing requires multer setup
+// Import — parse uploaded xlsx/csv and bulk insert
 const importData = async (req, res) => {
   try {
-    success(res, { message: `Import for type '${req.params.type}' received. Processing not yet implemented.` });
+    const result = await svc.importData(req.params.type, req.file, req.storeId, req.user.id);
+    success(res, result);
+  } catch (e) { error(res, e.message); }
+};
+
+// Download import template for a given type
+const downloadTemplate = async (req, res) => {
+  try {
+    const { buffer, filename } = svc.getImportTemplate(req.params.type);
+    res.setHeader('Content-Type', XLSX_CONTENT_TYPE);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
   } catch (e) { error(res, e.message); }
 };
 
@@ -90,4 +101,4 @@ const exportTransactions = async (req, res) => {
   } catch (e) { error(res, e.message); }
 };
 
-module.exports = { getReceipts, getFinancial, getCustomerHistory, exportReceiptsExcel, exportFinancialExcel, exportReceiptsTally, exportChallans, exportCustomers, exportSuppliers, exportTransactions, importData };
+module.exports = { getReceipts, getFinancial, getCustomerHistory, exportReceiptsExcel, exportFinancialExcel, exportReceiptsTally, exportChallans, exportCustomers, exportSuppliers, exportTransactions, importData, downloadTemplate };
