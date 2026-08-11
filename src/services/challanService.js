@@ -154,4 +154,13 @@ const approveChallan = async (id, storeId, userId) => {
     await conn.commit();
     await audit.log({ storeId, userId, action: 'CHALLAN_PAID', entityType: 'CHALLAN', entityId: id,
       details: { challan_number: challan.challan_number, amount: challan.total_amount } });
-    return getById(id, storeId); = { getAll, getById, create, getByDateRange, rejectChallan, approveChallan };
+    return getById(id, storeId);
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
+};
+
+module.exports = { getAll, getById, create, getByDateRange, rejectChallan, approveChallan };
