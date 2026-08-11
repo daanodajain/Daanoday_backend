@@ -166,7 +166,11 @@ CREATE TABLE system_settings (
 CREATE TABLE roles (
   id       BIGINT PRIMARY KEY AUTO_INCREMENT,
   store_id BIGINT NULL,   -- NULL = global (SUPER_ADMIN)
-  name     ENUM('SUPER_ADMIN','STORE_ADMIN','SUB_ADMIN','RECEIPT_MANAGER','CASHIER') NOT NULL,
+  -- NOTE: was ENUM('SUPER_ADMIN','STORE_ADMIN','SUB_ADMIN','RECEIPT_MANAGER','CASHIER').
+  -- Changed to VARCHAR because store admins can create custom role names from the UI
+  -- (e.g. "Accountant"), and an ENUM silently truncates any value outside its list to
+  -- '' on non-strict MySQL (see migrations/003_fix_roles_name_enum.sql).
+  name     VARCHAR(50) NOT NULL,
   FOREIGN KEY (store_id) REFERENCES stores(id),
   INDEX idx_roles_store (store_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
