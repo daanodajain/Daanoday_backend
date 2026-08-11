@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const audit = require('./auditLogService');
 
 const _generateChallanNumber = async (storeId, conn) => {
   const year = new Date().getFullYear();
@@ -93,6 +94,8 @@ const create = async (data, storeId, userId) => {
     );
 
     await conn.commit();
+    await audit.log({ storeId, userId, action: 'CHALLAN_CREATED', entityType: 'CHALLAN', entityId: challanId,
+      details: { challan_number: challanNumber, amount: data.totalAmount, supplier_id: data.supplierId } });
     return getById(challanId, storeId);
   } catch (e) {
     await conn.rollback();
@@ -120,6 +123,8 @@ const rejectChallan = async (id, storeId, userId, note) => {
       "UPDATE transactions SET status = 'FAILED' WHERE type = 'CHALLAN' AND reference_id = ?", [id]
     );
     await conn.commit();
+    await audit.log({ storeId, userId, action: 'CHALLAN_CANCELLED', entityType: 'CHALLAN', entityId: id,
+      details: { challan_number: challan.challan_number, amount: challan.total_amount, reason: note } });
     return getById(id, storeId);
   } catch (e) {
     await conn.rollback();
@@ -147,13 +152,6 @@ const approveChallan = async (id, storeId, userId) => {
       "UPDATE transactions SET status = 'SUCCESS' WHERE type = 'CHALLAN' AND reference_id = ?", [id]
     );
     await conn.commit();
-    return getById(id, storeId);
-  } catch (e) {
-    await conn.rollback();
-    throw e;
-  } finally {
-    conn.release();
-  }
-};
-
-module.exports = { getAll, getById, create, getByDateRange, rejectChallan, approveChallan };
+    await audit.log({ storeId, userId, action: 'CHALLAN_PAID', entityType: 'CHALLAN', entityId: id,
+      details: { challan_number: challan.challan_number, amount: challan.total_amount } });
+    return getById(id, storeId); = { getAll, getById, create, getByDateRange, rejectChallan, approveChallan };

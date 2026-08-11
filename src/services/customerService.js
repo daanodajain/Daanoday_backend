@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const audit = require('./auditLogService');
 
 // ─────────────────────────────────────────────────────────────
 // CORE: single reusable function — called by receipt creation
@@ -98,6 +99,8 @@ const createCustomer = async (data, storeId, callerUserId = null) => {
     vals.push(customerId);
     await db.query(`UPDATE customers SET ${fields.join(', ')} WHERE id = ?`, vals);
   }
+  await audit.log({ storeId, userId: callerUserId, action: 'CUSTOMER_CREATED', entityType: 'CUSTOMER', entityId: customerId,
+    details: { name: data.name, mobile: data.mobile } });
   return getCustomerById(customerId, storeId);
 };
 

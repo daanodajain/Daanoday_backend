@@ -135,12 +135,8 @@ const approveChangeRequest = async (id, reviewedBy, reviewNote) => {
         );
       }
     } else if (cr.action === 'UPDATE') {
-      // NOTE: new_data is a MySQL JSON column — mysql2 auto-parses it into a
-      // JS object on read, so cr.new_data is already an object here, not a
-      // string. Calling JSON.parse() on it stringifies to "[object Object]"
-      // first and then fails to parse — that was the "not valid JSON" 400.
       const newData = typeof cr.new_data === 'string' ? JSON.parse(cr.new_data) : cr.new_data;
-      // Only allow safe fields to be updated
+      if (!newData) throw new Error('UPDATE_DATA_MISSING: No new data provided in this change request');
       const allowed = cr.entity_type === 'RECEIPT'
         ? ['total_amount', 'payment_mode']
         : ['total_amount', 'payment_mode', 'supplier_id'];

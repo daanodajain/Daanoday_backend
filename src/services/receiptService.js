@@ -1,6 +1,7 @@
 const db = require('../config/db');
 const { findOrCreateCustomerForStore } = require('./customerService');
 const notifSvc = require('./notificationService');
+const audit = require('./auditLogService');
 
 // ── Number generation ────────────────────────────────────────
 const _generateReceiptNumber = async (storeId, conn) => {
@@ -93,9 +94,11 @@ const create = async (data, storeId, userId) => {
   const conn = await db.getConnection();
   await conn.beginTransaction();
   try {
-    const { customerId } = await findOrCreateCustomerForStore(
+    const { customerId, accountNumber } = await findOrCreateCustomerForStore(
       data.customerMobile, data.customerName, storeId, userId, conn
     );
+    const [[customerRow]] = await conn.query('SELECT name FROM customers WHERE id = ?', [customerId]);
+    const customerName = customerRow?.name || data.customerName;
 
     const [[settings]] = await conn.query(
       'SELECT auto_approve_cash, cash_approval_limit FROM store_settings WHERE store_id = ?',
@@ -150,6 +153,9 @@ const create = async (data, storeId, userId) => {
     );
 
     await conn.commit();
+    // Audit log
+    await audit.log({ storeId, userId, action: 'RECEIPT_CREATED', entityType: 'RECEIPT', entityId: receiptId,
+      details: { receipt_number: receiptNumber, amount: data.totalAmount, customer_name: customerName, account_number: accountNumber, state: receiptState } });
     // Notify store admins if pending approval
     if (receiptState === 'PENDING_APPROVAL') {
       try {
@@ -199,6 +205,8 @@ const approveReceipt = async (id, storeId, userId, note) => {
       "UPDATE transactions SET status = 'SUCCESS' WHERE type = 'RECEIPT' AND reference_id = ?", [id]
     );
     await conn.commit();
+    await audit.log({ storeId, userId, action: 'RECEIPT_APPROVED', entityType: 'RECEIPT', entityId: id,
+      details: { receipt_number: receipt.receipt_number, amount: receipt.total_amount, note } });
     // Notify receipt creator
     try {
       await notifSvc.create(receipt.created_by, storeId, {
@@ -238,6 +246,8 @@ const rejectReceipt = async (id, storeId, userId, note) => {
       "UPDATE transactions SET status = 'FAILED' WHERE type = 'RECEIPT' AND reference_id = ?", [id]
     );
     await conn.commit();
+    await audit.log({ storeId, userId, action: 'RECEIPT_REJECTED', entityType: 'RECEIPT', entityId: id,
+      details: { receipt_number: receipt.receipt_number, amount: receipt.total_amount, note } });
     return getById(id, storeId);
   } catch (e) {
     await conn.rollback();
@@ -289,6 +299,8 @@ const markPaid = async (id, storeId, userId, paymentMode) => {
       [finalMode, id]
     );
     await conn.commit();
+    await audit.log({ storeId, userId, action: 'RECEIPT_MARKED_PAID', entityType: 'RECEIPT', entityId: id,
+      details: { receipt_number: receipt.receipt_number, amount: receipt.total_amount, payment_mode: finalMode } });
     return getById(id, storeId);
   } catch (e) {
     await conn.rollback();
