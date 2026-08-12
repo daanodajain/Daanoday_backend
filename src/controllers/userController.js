@@ -27,7 +27,7 @@ const remove = async (req, res) => {
 };
 
 const toggleStatus = async (req, res) => {
-  try { success(res, await svc.toggleUserStatus(req.params.id)); }
+  try { success(res, await svc.toggleUserStatus(req.params.id, req.user.id)); }
   catch (e) { error(res, e.message); }
 };
 

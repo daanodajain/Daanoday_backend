@@ -15,6 +15,7 @@ router.post('/:id/approve', requirePermission('receipts', 'approve'), ctrl.appro
 router.post('/:id/reject', requirePermission('receipts', 'approve'), ctrl.reject);
 router.post('/:id/state-change', requirePermission('receipts', 'approve'), ctrl.stateChange);
 router.post('/:id/pay', requirePermission('receipts', 'approve'), ctrl.pay);
+router.post('/:id/collect-remaining', requirePermission('receipts', 'approve'), ctrl.collectRemaining);
 
 // Direct edit/delete not allowed — use /api/change-requests
 router.put('/:id', ctrl.notAllowed);

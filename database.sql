@@ -240,13 +240,14 @@ CREATE TABLE receipts (
   receipt_number VARCHAR(30) NOT NULL,
   customer_id    BIGINT NOT NULL,
   total_amount   DECIMAL(12,2) NOT NULL,
+  paid_amount    DECIMAL(12,2) NOT NULL DEFAULT 0,
   payment_mode   ENUM('CASH','CHEQUE','ONLINE') NULL,
   receipt_date   DATE NOT NULL DEFAULT (CURDATE()),
   payment_date   DATE NULL,
   is_due         BOOLEAN DEFAULT FALSE,
   remarks        TEXT NULL,
   receipt_state  ENUM('DRAFT','PENDING_APPROVAL','APPROVED','REJECTED','CANCELLED') DEFAULT 'DRAFT',
-  status         ENUM('UNPAID','PAID') DEFAULT 'UNPAID',
+  status         ENUM('UNPAID','PARTIAL','PAID') DEFAULT 'UNPAID',
   cancel_reason  TEXT NULL,
   created_by     BIGINT NOT NULL,
   created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -264,6 +265,7 @@ CREATE TABLE receipt_particulars (
   particular_id   BIGINT NOT NULL,
   particular_name VARCHAR(255) NOT NULL,
   amount          DECIMAL(12,2) NOT NULL,
+  paid_amount     DECIMAL(12,2) NOT NULL DEFAULT 0,
   FOREIGN KEY (receipt_id)    REFERENCES receipts(id),
   FOREIGN KEY (particular_id) REFERENCES particulars(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -80,7 +80,10 @@ const deleteUser = async (id, deletedByUserId, storeId) => {
   await auditLog.log({ storeId, userId: deletedByUserId, action: 'USER_DELETED', entityType: 'USER', entityId: id });
 };
 
-const toggleUserStatus = async (id) => {
+const toggleUserStatus = async (id, requestingUserId) => {
+  if (String(id) === String(requestingUserId)) {
+    throw new Error('CANNOT_DEACTIVATE_SELF');
+  }
   const [[user]] = await db.query('SELECT id, active FROM users WHERE id = ?', [id]);
   if (!user) throw new Error('USER_NOT_FOUND');
   await db.query('UPDATE users SET active = ? WHERE id = ?', [!user.active, id]);

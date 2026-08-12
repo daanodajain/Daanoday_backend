@@ -100,12 +100,31 @@ const create = async (data, storeId, userId) => {
     const [[customerRow]] = await conn.query('SELECT name FROM customers WHERE id = ?', [customerId]);
     const customerName = customerRow?.name || data.customerName;
 
+    const isDue = data.isDue === true || data.isDue === 'true';
+    const isPartial = !isDue && (data.isPartial === true || data.isPartial === 'true');
+
+    // Partial payment: sum whatever was actually paid per-particular (falls
+    // back to the flat data.paidAmount if particulars don't carry their own
+    // paidAmount). Due receipts are always 0 paid; full receipts are fully paid.
+    let paidAmount;
+    if (isDue) {
+      paidAmount = 0;
+    } else if (isPartial) {
+      if (data.particulars?.some(p => p.paidAmount !== undefined)) {
+        paidAmount = data.particulars.reduce((sum, p) => sum + Number(p.paidAmount || 0), 0);
+      } else {
+        paidAmount = Number(data.paidAmount || 0);
+      }
+      if (paidAmount <= 0) throw new Error('PARTIAL_PAYMENT_MUST_BE_GREATER_THAN_ZERO');
+      if (paidAmount >= Number(data.totalAmount)) throw new Error('PARTIAL_PAYMENT_MUST_BE_LESS_THAN_TOTAL');
+    } else {
+      paidAmount = Number(data.totalAmount);
+    }
+
     const [[settings]] = await conn.query(
       'SELECT auto_approve_cash, cash_approval_limit FROM store_settings WHERE store_id = ?',
       [storeId]
     );
-
-    const isDue = data.isDue === true || data.isDue === 'true';
 
     // Due receipt — always PENDING, UNPAID, no payment mode needed
     let receiptState, status;
@@ -118,7 +137,7 @@ const create = async (data, storeId, userId) => {
         && !settings.auto_approve_cash
         && Number(data.totalAmount) > Number(settings.cash_approval_limit || 0);
       receiptState = needsApproval ? 'PENDING_APPROVAL' : 'APPROVED';
-      status = needsApproval ? 'UNPAID' : 'PAID';
+      status = needsApproval ? 'UNPAID' : (isPartial ? 'PARTIAL' : 'PAID');
     }
 
     const receiptNumber = await _generateReceiptNumber(storeId, conn);
@@ -128,28 +147,37 @@ const create = async (data, storeId, userId) => {
 
     const [result] = await conn.query(
       `INSERT INTO receipts
-        (store_id, receipt_number, customer_id, total_amount, payment_mode,
+        (store_id, receipt_number, customer_id, total_amount, paid_amount, payment_mode,
          receipt_date, payment_date, is_due, remarks,
          receipt_state, status, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [storeId, receiptNumber, customerId, data.totalAmount, paymentMode,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [storeId, receiptNumber, customerId, data.totalAmount, paidAmount, paymentMode,
        receiptDate, paymentDate, isDue, data.remarks || null,
        receiptState, status, userId]
     );
     const receiptId = result.insertId;
 
     if (data.particulars?.length) {
-      const vals = data.particulars.map(p => [receiptId, p.particularId, p.particularName, p.amount]);
+      const vals = data.particulars.map(p => {
+        // Each particular's own paid amount: explicit value if partial with
+        // per-line tracking, else fully paid/unpaid matching the receipt.
+        let pPaid;
+        if (isDue) pPaid = 0;
+        else if (isPartial && p.paidAmount !== undefined) pPaid = Number(p.paidAmount || 0);
+        else if (isPartial) pPaid = 0; // flat partial without per-line split — reconciled later
+        else pPaid = Number(p.amount);
+        return [receiptId, p.particularId, p.particularName, p.amount, pPaid];
+      });
       await conn.query(
-        'INSERT INTO receipt_particulars (receipt_id, particular_id, particular_name, amount) VALUES ?',
+        'INSERT INTO receipt_particulars (receipt_id, particular_id, particular_name, amount, paid_amount) VALUES ?',
         [vals]
       );
     }
 
-    const txnStatus = status === 'PAID' ? 'SUCCESS' : 'INITIATED';
+    const txnStatus = status === 'PAID' ? 'SUCCESS' : (status === 'PARTIAL' ? 'SUCCESS' : 'INITIATED');
     await conn.query(
       'INSERT INTO transactions (store_id, type, reference_id, amount, payment_mode, status) VALUES (?, ?, ?, ?, ?, ?)',
-      [storeId, 'RECEIPT', receiptId, data.totalAmount, paymentMode, txnStatus]
+      [storeId, 'RECEIPT', receiptId, paidAmount, paymentMode, txnStatus]
     );
 
     await conn.commit();
@@ -310,6 +338,71 @@ const markPaid = async (id, storeId, userId, paymentMode) => {
   }
 };
 
+// Collect the remaining due amount on a PARTIAL receipt, closing it to PAID.
+// Distributes the newly collected amount across particulars in order until
+// each particular's own remaining due is covered (so particular-level
+// paid_amount stays accurate even if the original partial payment wasn't
+// split evenly across particulars).
+const collectRemaining = async (id, storeId, userId, paymentMode, paymentDate) => {
+  const [[receipt]] = await db.query(
+    'SELECT * FROM receipts WHERE id = ? AND store_id = ?', [id, storeId]
+  );
+  if (!receipt) throw new Error('RECEIPT_NOT_FOUND');
+  if (receipt.status !== 'PARTIAL') throw new Error('RECEIPT_NOT_PARTIAL');
+
+  const remaining = Number(receipt.total_amount) - Number(receipt.paid_amount);
+  if (remaining <= 0) throw new Error('NOTHING_REMAINING_TO_COLLECT');
+
+  const finalMode = paymentMode || receipt.payment_mode;
+  if (!finalMode) throw new Error('PAYMENT_MODE_REQUIRED');
+  const today = new Date().toISOString().split('T')[0];
+
+  const conn = await db.getConnection();
+  await conn.beginTransaction();
+  try {
+    const [particulars] = await conn.query(
+      'SELECT id, amount, paid_amount FROM receipt_particulars WHERE receipt_id = ? ORDER BY id', [id]
+    );
+    let leftToApply = remaining;
+    for (const p of particulars) {
+      if (leftToApply <= 0) break;
+      const dueOnLine = Number(p.amount) - Number(p.paid_amount);
+      if (dueOnLine <= 0) continue;
+      const applyToLine = Math.min(dueOnLine, leftToApply);
+      await conn.query(
+        'UPDATE receipt_particulars SET paid_amount = paid_amount + ? WHERE id = ?',
+        [applyToLine, p.id]
+      );
+      leftToApply -= applyToLine;
+    }
+
+    await conn.query(
+      "UPDATE receipts SET status = 'PAID', paid_amount = total_amount, payment_mode = ?, payment_date = ? WHERE id = ?",
+      [finalMode, paymentDate || today, id]
+    );
+    await conn.query(
+      'INSERT INTO transactions (store_id, type, reference_id, amount, payment_mode, status) VALUES (?, ?, ?, ?, ?, ?)',
+      [storeId, 'RECEIPT', id, remaining, finalMode, 'SUCCESS']
+    );
+    await conn.commit();
+    await audit.log({ storeId, userId, action: 'RECEIPT_REMAINING_COLLECTED', entityType: 'RECEIPT', entityId: id,
+      details: { receipt_number: receipt.receipt_number, remaining_collected: remaining, payment_mode: finalMode } });
+    try {
+      await notifSvc.create(receipt.created_by, storeId, {
+        type: 'PAYMENT_RECEIVED',
+        message: `Remaining ₹${remaining} collected for receipt ${receipt.receipt_number} — now fully paid`,
+        referenceId: id, referenceType: 'RECEIPT'
+      });
+    } catch (e) {}
+    return getById(id, storeId);
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
+};
+
 // Get approval history for a receipt
 const getApprovals = async (id, storeId) => {
   const [[receipt]] = await db.query(
@@ -328,4 +421,4 @@ const getApprovals = async (id, storeId) => {
   return rows;
 };
 
-module.exports = { getAll, getById, create, approveReceipt, rejectReceipt, getPendingApprovals, getByDateRange, changeState, markPaid, getApprovals };
+module.exports = { getAll, getById, create, approveReceipt, rejectReceipt, getPendingApprovals, getByDateRange, changeState, markPaid, collectRemaining, getApprovals };

@@ -46,6 +46,11 @@ const pay = async (req, res) => {
   catch (e) { error(res, e.message); }
 };
 
+const collectRemaining = async (req, res) => {
+  try { success(res, await svc.collectRemaining(req.params.id, req.storeId, req.user.id, req.body?.paymentMode, req.body?.paymentDate)); }
+  catch (e) { error(res, e.message); }
+};
+
 const getApprovals = async (req, res) => {
   try { success(res, await svc.getApprovals(req.params.id, req.storeId)); }
   catch (e) { error(res, e.message); }
@@ -99,4 +104,4 @@ const getPdf = async (req, res) => {
 const notAllowed = (req, res) =>
   res.status(405).json({ status: 'ERROR', DDMS_error_code: 'USE_CHANGE_REQUEST_ENDPOINT' });
 
-module.exports = { getAll, getById, create, approve, reject, getPending, getByDateRange, stateChange, pay, getApprovals, getPdf, notAllowed };
+module.exports = { getAll, getById, create, approve, reject, getPending, getByDateRange, stateChange, pay, collectRemaining, getApprovals, getPdf, notAllowed };
