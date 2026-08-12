@@ -172,6 +172,12 @@ const approveChangeRequest = async (id, reviewedBy, reviewNote) => {
         if (newData.payment_mode !== undefined) { sets.push('payment_mode = ?'); vals.push(newData.payment_mode); }
         vals.push(cr.entity_id);
         await conn.query(`UPDATE receipts SET ${sets.join(', ')} WHERE id = ?`, vals);
+        
+        // Update transaction amount to reflect new total/paid
+        await conn.query(
+          `UPDATE transactions SET amount = ?, status = ? WHERE type = 'RECEIPT' AND reference_id = ?`,
+          [paidAmount, paidAmount > 0 ? 'SUCCESS' : 'INITIATED', cr.entity_id]
+        );
       } else {
         const allowed = ['total_amount', 'payment_mode', 'supplier_id'];
         const sets = [];

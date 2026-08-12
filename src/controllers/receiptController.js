@@ -48,7 +48,7 @@ const getPdf = async (req, res) => {
         .moveTo(margin, y).lineTo(W - margin, y).stroke().restore();
     };
 
-    const amountStr = (n) => `₹ ${Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+    const amountStr = (n) => `Rs. ${Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
 
     // ════════════════════════════════════════════════════════════
     // MODERN TEMPLATE
