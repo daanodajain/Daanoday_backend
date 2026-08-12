@@ -49,11 +49,14 @@ const getAll = async (storeId) => {
 const getById = async (id, storeId) => {
   const [[receipt]] = await db.query(
     `SELECT r.*, c.name as customer_name, c.mobile as customer_mobile,
-            csa.account_number, u.name as created_by_name
+            csa.account_number, u.name as created_by_name,
+            s.name as store_name, s.address as store_address,
+            s.contact as store_contact, s.email as store_email
      FROM receipts r
      JOIN customers c ON c.id = r.customer_id
      JOIN customer_store_access csa ON csa.customer_id = c.id AND csa.store_id = r.store_id
      JOIN users u ON u.id = r.created_by
+     JOIN stores s ON s.id = r.store_id
      WHERE r.id = ? AND r.store_id = ?`,
     [id, storeId]
   );

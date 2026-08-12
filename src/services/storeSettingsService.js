@@ -16,6 +16,7 @@ const update = async (storeId, data, userId) => {
     razorpayKeyId: 'razorpay_key_id', razorpayKeySecret: 'razorpay_key_secret',
     smsEnabled: 'sms_enabled', emailEnabled: 'email_enabled',
     lockedBeforeDate: 'locked_before_date', enable80g: 'enable_80g',
+    receiptTemplate: 'receipt_template', receiptHeaderText: 'receipt_header_text',
     autoSendReceiptSms: 'auto_send_receipt_sms', autoSendReceiptEmail: 'auto_send_receipt_email',
     sessionTimeoutMinutes: 'session_timeout_minutes', inactivityLockMinutes: 'inactivity_lock_minutes'
   };
