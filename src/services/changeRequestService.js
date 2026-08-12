@@ -137,17 +137,52 @@ const approveChangeRequest = async (id, reviewedBy, reviewNote) => {
     } else if (cr.action === 'UPDATE') {
       const newData = typeof cr.new_data === 'string' ? JSON.parse(cr.new_data) : cr.new_data;
       if (!newData) throw new Error('UPDATE_DATA_MISSING: No new data provided in this change request');
-      const allowed = cr.entity_type === 'RECEIPT'
-        ? ['total_amount', 'payment_mode']
-        : ['total_amount', 'payment_mode', 'supplier_id'];
-      const sets = [];
-      const vals = [];
-      for (const field of allowed) {
-        if (newData[field] !== undefined) { sets.push(`${field} = ?`); vals.push(newData[field]); }
-      }
-      if (sets.length) {
+
+      if (cr.entity_type === 'RECEIPT') {
+        // Particulars replace (if the request edited line items) — recompute
+        // total_amount, paid_amount and status from the new particulars so a
+        // PARTIAL receipt's status/due actually reflects the edit, instead of
+        // just patching total_amount/payment_mode and leaving status stale.
+        let totalAmount, paidAmount;
+        if (Array.isArray(newData.particulars) && newData.particulars.length) {
+          await conn.query('DELETE FROM receipt_particulars WHERE receipt_id = ?', [cr.entity_id]);
+          const vals = newData.particulars.map(p => [
+            cr.entity_id, p.particularId, p.particularName, p.amount,
+            p.paidAmount !== undefined ? Number(p.paidAmount) : Number(p.amount)
+          ]);
+          await conn.query(
+            'INSERT INTO receipt_particulars (receipt_id, particular_id, particular_name, amount, paid_amount) VALUES ?',
+            [vals]
+          );
+          totalAmount = newData.particulars.reduce((s, p) => s + Number(p.amount), 0);
+          paidAmount = newData.particulars.reduce(
+            (s, p) => s + Number(p.paidAmount !== undefined ? p.paidAmount : p.amount), 0
+          );
+        } else {
+          const [[current]] = await conn.query('SELECT total_amount, paid_amount FROM receipts WHERE id = ?', [cr.entity_id]);
+          totalAmount = newData.total_amount !== undefined ? Number(newData.total_amount) : Number(current.total_amount);
+          paidAmount = newData.paidAmount !== undefined ? Number(newData.paidAmount) : Number(current.paid_amount);
+        }
+        // Never let paid_amount exceed the (possibly reduced) total.
+        if (paidAmount > totalAmount) paidAmount = totalAmount;
+        const status = paidAmount <= 0 ? 'UNPAID' : (paidAmount >= totalAmount ? 'PAID' : 'PARTIAL');
+
+        const sets = ['total_amount = ?', 'paid_amount = ?', 'status = ?'];
+        const vals = [totalAmount, paidAmount, status];
+        if (newData.payment_mode !== undefined) { sets.push('payment_mode = ?'); vals.push(newData.payment_mode); }
         vals.push(cr.entity_id);
-        await conn.query(`UPDATE ${table} SET ${sets.join(', ')} WHERE id = ?`, vals);
+        await conn.query(`UPDATE receipts SET ${sets.join(', ')} WHERE id = ?`, vals);
+      } else {
+        const allowed = ['total_amount', 'payment_mode', 'supplier_id'];
+        const sets = [];
+        const vals = [];
+        for (const field of allowed) {
+          if (newData[field] !== undefined) { sets.push(`${field} = ?`); vals.push(newData[field]); }
+        }
+        if (sets.length) {
+          vals.push(cr.entity_id);
+          await conn.query(`UPDATE ${table} SET ${sets.join(', ')} WHERE id = ?`, vals);
+        }
       }
     }
 
