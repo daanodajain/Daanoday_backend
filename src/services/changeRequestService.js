@@ -71,6 +71,18 @@ const createChangeRequest = async ({ storeId, entityType, entityId, action, requ
   const [[entity]] = await db.query(`SELECT * FROM ${table} WHERE id = ? AND store_id = ?`, [entityId, storeId]);
   if (!entity) throw new Error(`${entityType}_NOT_FOUND`);
 
+  // For receipts, also snapshot the current particulars — otherwise the
+  // admin reviewing this request has no way to see what items existed
+  // before, only the flat total_amount, and can't tell if items were
+  // added/removed/changed.
+  if (entityType === 'RECEIPT') {
+    const [particulars] = await db.query(
+      'SELECT particular_id, particular_name, amount, paid_amount FROM receipt_particulars WHERE receipt_id = ?',
+      [entityId]
+    );
+    entity.particulars = particulars;
+  }
+
   const [result] = await db.query(
     `INSERT INTO change_requests (store_id, entity_type, entity_id, action, requested_by, old_data, new_data, reason)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
