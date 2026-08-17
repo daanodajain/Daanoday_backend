@@ -421,10 +421,22 @@ const getPdf = async (req, res) => {
         .text('This is a computer generated receipt.', margin, y + 5, { width: contentW, align: 'center' });
     }
 
+    doc.on('error', (streamErr) => {
+      console.error('PDF stream error:', streamErr);
+      if (!res.headersSent) error(res, streamErr.message);
+      else res.end();
+    });
+
     doc.end();
   } catch (e) {
     console.error('PDF error:', e);
-    error(res, e.message);
+    // If headers/streaming already started, we can no longer send a JSON
+    // error body — trying to do so throws "headers already sent" and
+    // crashes the handler, leaving the client hanging until it times out.
+    // Just end the response so the client's request completes (with an
+    // error/incomplete PDF) instead of hanging indefinitely.
+    if (res.headersSent) res.end();
+    else error(res, e.message);
   }
 };
 

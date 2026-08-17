@@ -225,8 +225,17 @@ const approveReceipt = async (id, storeId, userId, note) => {
   const conn = await db.getConnection();
   await conn.beginTransaction();
   try {
+    // Status must reflect actual paid_amount vs total_amount — NOT be
+    // hardcoded to PAID. A partial-payment or due receipt that needed cash
+    // approval must stay PARTIAL/UNPAID after approval, not silently become
+    // fully paid (that was making customers who still owe money show as
+    // fully settled the moment their receipt got approved).
+    const paidAmount = Number(receipt.paid_amount || 0);
+    const totalAmount = Number(receipt.total_amount);
+    const status = paidAmount <= 0 ? 'UNPAID' : (paidAmount >= totalAmount ? 'PAID' : 'PARTIAL');
+
     await conn.query(
-      "UPDATE receipts SET receipt_state = 'APPROVED', status = 'PAID' WHERE id = ?", [id]
+      "UPDATE receipts SET receipt_state = 'APPROVED', status = ? WHERE id = ?", [status, id]
     );
     await conn.query(
       "INSERT INTO receipt_approvals (receipt_id, approved_by, action, note) VALUES (?, ?, 'APPROVED', ?)",
