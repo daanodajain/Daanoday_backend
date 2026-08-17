@@ -1,6 +1,17 @@
 const db = require('../config/db');
 const bcrypt = require('bcryptjs');
 
+// mysql2 rejects raw ISO 8601 strings (e.g. "2026-09-16T06:12:21.954Z") for
+// DATETIME columns — "Incorrect datetime value" error. Converts to MySQL's
+// expected "YYYY-MM-DD HH:MM:SS" format. Accepts a Date, an ISO string, or
+// a plain "YYYY-MM-DD" (from a date-only <input type="date">), and leaves
+// already-MySQL-formatted strings untouched.
+const toMySQLDateTime = (input) => {
+  const d = input instanceof Date ? input : new Date(input);
+  if (isNaN(d.getTime())) return input; // not a parseable date — pass through, let DB validate
+  return d.toISOString().slice(0, 19).replace('T', ' ');
+};
+
 const getAllStores = async () => {
   const [rows] = await db.query(
     `SELECT s.*, u.name as admin_name, u.mobile as admin_mobile, u.email as admin_email
@@ -73,7 +84,7 @@ const updateStore = async (id, data) => {
     if (sub) {
       const updates = [];
       const vals = [];
-      if (data.subscriptionExpiresAt) { updates.push('end_date = ?'); vals.push(data.subscriptionExpiresAt); }
+      if (data.subscriptionExpiresAt) { updates.push('end_date = ?'); vals.push(toMySQLDateTime(data.subscriptionExpiresAt)); }
       if (data.subscriptionStatus)    { updates.push('status = ?');   vals.push(data.subscriptionStatus); }
       if (updates.length) {
         vals.push(id);
@@ -168,7 +179,7 @@ const createStoreWithAdmin = async (data) => {
     await conn.query('INSERT INTO challan_sequences (store_id, year, last_sequence) VALUES (?, ?, 0)', [storeId, year]);
 
     // 9. Subscription
-    const endDate = subscriptionExpiresAt || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    const endDate = toMySQLDateTime(subscriptionExpiresAt || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000));
     await conn.query(
       "INSERT INTO subscriptions (store_id, plan_type, status, end_date) VALUES (?, 'FREE', 'TRIAL', ?)",
       [storeId, endDate]
