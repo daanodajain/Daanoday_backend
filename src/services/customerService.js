@@ -25,9 +25,15 @@ const findOrCreateCustomerForStore = async (mobile, name, storeId, callerUserId 
   );
   if (!access) {
     const accountNumber = await _generateAccountNumber(storeId, q);
+    // First store this customer is linked to becomes their primary store
+    const [[existingCount]] = await q.query(
+      'SELECT COUNT(*) as cnt FROM customer_store_access WHERE customer_id = ?',
+      [customer.id]
+    );
+    const isPrimary = existingCount.cnt === 0;
     await q.query(
-      'INSERT INTO customer_store_access (customer_id, store_id, account_number, is_primary_store) VALUES (?, ?, ?, FALSE)',
-      [customer.id, storeId, accountNumber]
+      'INSERT INTO customer_store_access (customer_id, store_id, account_number, is_primary_store) VALUES (?, ?, ?, ?)',
+      [customer.id, storeId, accountNumber, isPrimary]
     );
     access = { account_number: accountNumber };
   }

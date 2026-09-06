@@ -31,7 +31,21 @@ const _checkLockPeriod = async (storeId) => {
 };
 
 // ── Read ─────────────────────────────────────────────────────
-const getAll = async (storeId) => {
+const getAll = async (storeId, filters = {}) => {
+  const { search, status, receipt_state, startDate, endDate } = filters;
+  const conditions = ['r.store_id = ?'];
+  const params = [storeId];
+
+  if (search) {
+    conditions.push('(c.name LIKE ? OR c.mobile LIKE ? OR r.receipt_number LIKE ? OR csa.account_number LIKE ?)');
+    const q = `%${search}%`;
+    params.push(q, q, q, q);
+  }
+  if (status) { conditions.push('r.status = ?'); params.push(status); }
+  if (receipt_state) { conditions.push('r.receipt_state = ?'); params.push(receipt_state); }
+  if (startDate) { conditions.push('DATE(r.created_at) >= ?'); params.push(startDate); }
+  if (endDate) { conditions.push('DATE(r.created_at) <= ?'); params.push(endDate); }
+
   const [rows] = await db.query(
     `SELECT r.*, c.name as customer_name, c.mobile as customer_mobile,
             csa.account_number, u.name as created_by_name
@@ -39,9 +53,9 @@ const getAll = async (storeId) => {
      JOIN customers c ON c.id = r.customer_id
      JOIN customer_store_access csa ON csa.customer_id = c.id AND csa.store_id = r.store_id
      JOIN users u ON u.id = r.created_by
-     WHERE r.store_id = ?
+     WHERE ${conditions.join(' AND ')}
      ORDER BY r.created_at DESC`,
-    [storeId]
+    params
   );
   return rows;
 };
@@ -79,10 +93,14 @@ const getPendingApprovals = async (storeId) => {
 };
 
 const getByDateRange = async (storeId, startDate, endDate) => {
+  if (!startDate || !endDate) throw new Error('START_DATE_AND_END_DATE_REQUIRED');
   const [rows] = await db.query(
-    `SELECT r.*, c.name as customer_name
+    `SELECT r.*, c.name as customer_name, c.mobile as customer_mobile,
+            csa.account_number, u.name as created_by_name
      FROM receipts r
      JOIN customers c ON c.id = r.customer_id
+     JOIN customer_store_access csa ON csa.customer_id = c.id AND csa.store_id = r.store_id
+     JOIN users u ON u.id = r.created_by
      WHERE r.store_id = ? AND DATE(r.created_at) BETWEEN ? AND ?
      ORDER BY r.created_at DESC`,
     [storeId, startDate, endDate]
@@ -300,47 +318,123 @@ const rejectReceipt = async (id, storeId, userId, note) => {
 
 
 // State change (generic — covers VOID, CANCELLED etc.)
+// Only APPROVED → CANCELLED is currently a valid transition via this path.
+// receipt_approvals.action ENUM only accepts 'APPROVED'|'REJECTED' so we
+// log 'APPROVED' for a cancellation action (it means "change approved").
 const changeState = async (id, storeId, userId, newState, note) => {
+  const VALID_STATES = ['CANCELLED'];
+  if (!VALID_STATES.includes(newState)) throw new Error(`INVALID_STATE: ${newState}. Valid: ${VALID_STATES.join(',')}`);
+
   const [[receipt]] = await db.query(
     'SELECT * FROM receipts WHERE id = ? AND store_id = ?', [id, storeId]
   );
   if (!receipt) throw new Error('RECEIPT_NOT_FOUND');
+  if (receipt.receipt_state === newState) throw new Error('ALREADY_IN_STATE');
 
-  await db.query('UPDATE receipts SET receipt_state = ? WHERE id = ?', [newState, id]);
-  await db.query(
-    'INSERT INTO receipt_approvals (receipt_id, approved_by, action, note) VALUES (?, ?, ?, ?)',
-    [id, userId, newState, note || null]
-  );
-  return getById(id, storeId);
+  const conn = await db.getConnection();
+  await conn.beginTransaction();
+  try {
+    await conn.query('UPDATE receipts SET receipt_state = ? WHERE id = ?', [newState, id]);
+    if (newState === 'CANCELLED') {
+      await conn.query(
+        "UPDATE transactions SET status = 'FAILED' WHERE type = 'RECEIPT' AND reference_id = ?", [id]
+      );
+    }
+    // receipt_approvals ENUM only has APPROVED/REJECTED — log as APPROVED (the state-change request was approved)
+    await conn.query(
+      "INSERT INTO receipt_approvals (receipt_id, approved_by, action, note) VALUES (?, ?, 'APPROVED', ?)",
+      [id, userId, note || null]
+    );
+    await conn.commit();
+    await audit.log({ storeId, userId, action: `RECEIPT_STATE_CHANGED_TO_${newState}`, entityType: 'RECEIPT', entityId: id,
+      details: { receipt_number: receipt.receipt_number, from_state: receipt.receipt_state, to_state: newState, note } });
+    return getById(id, storeId);
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
 };
 
-// Mark receipt as paid (UNPAID → PAID). paymentMode is required when the receipt
-// was created as "due" (no payment mode was known at creation time).
+// Mark receipt as paid (UNPAID → PAID or UNPAID → PENDING_APPROVAL).
+// paymentMode is required when the receipt was created as "due" (no payment
+// mode was known at creation time).
+// If the payment mode is CASH and the store's cash_approval_limit applies,
+// the receipt goes to PENDING_APPROVAL instead of being directly paid — same
+// logic as the create() flow, closing the due-receipt approval bypass.
 const markPaid = async (id, storeId, userId, paymentMode) => {
   const [[receipt]] = await db.query(
     'SELECT * FROM receipts WHERE id = ? AND store_id = ?', [id, storeId]
   );
   if (!receipt) throw new Error('RECEIPT_NOT_FOUND');
   if (receipt.status === 'PAID') throw new Error('ALREADY_PAID');
+  if (receipt.receipt_state === 'PENDING_APPROVAL') throw new Error('ALREADY_PENDING_APPROVAL');
   if (!receipt.payment_mode && !paymentMode) throw new Error('PAYMENT_MODE_REQUIRED');
 
-  const finalMode = receipt.payment_mode || paymentMode;
+  const finalMode = paymentMode || receipt.payment_mode;
   const today = new Date().toISOString().split('T')[0];
+
+  // Cash approval check — same rule as create()
+  const [[settings]] = await db.query(
+    'SELECT auto_approve_cash, cash_approval_limit FROM store_settings WHERE store_id = ?',
+    [storeId]
+  );
+  const needsApproval = finalMode === 'CASH'
+    && settings
+    && !settings.auto_approve_cash
+    && Number(receipt.total_amount) > Number(settings.cash_approval_limit || 0);
 
   const conn = await db.getConnection();
   await conn.beginTransaction();
   try {
-    await conn.query(
-      "UPDATE receipts SET status = 'PAID', payment_mode = ?, payment_date = COALESCE(payment_date, ?) WHERE id = ?",
-      [finalMode, today, id]
-    );
-    await conn.query(
-      "UPDATE transactions SET status = 'SUCCESS', payment_mode = ? WHERE type = 'RECEIPT' AND reference_id = ?",
-      [finalMode, id]
-    );
-    await conn.commit();
-    await audit.log({ storeId, userId, action: 'RECEIPT_MARKED_PAID', entityType: 'RECEIPT', entityId: id,
-      details: { receipt_number: receipt.receipt_number, amount: receipt.total_amount, payment_mode: finalMode } });
+    if (needsApproval) {
+      // Send for approval — don't mark paid yet
+      await conn.query(
+        "UPDATE receipts SET receipt_state = 'PENDING_APPROVAL', payment_mode = ? WHERE id = ?",
+        [finalMode, id]
+      );
+      await conn.query(
+        "UPDATE transactions SET payment_mode = ? WHERE type = 'RECEIPT' AND reference_id = ?",
+        [finalMode, id]
+      );
+      await conn.commit();
+      await audit.log({ storeId, userId, action: 'RECEIPT_PAYMENT_PENDING_APPROVAL', entityType: 'RECEIPT', entityId: id,
+        details: { receipt_number: receipt.receipt_number, amount: receipt.total_amount, payment_mode: finalMode } });
+      // Notify approvers
+      try {
+        const [admins] = await db.query(
+          `SELECT u.id FROM users u JOIN user_roles ur ON ur.user_id = u.id
+           JOIN roles r ON r.id = ur.role_id
+           WHERE ur.store_id = ? AND r.name IN ('STORE_ADMIN','SUB_ADMIN') AND u.id != ?`,
+          [storeId, userId]
+        );
+        for (const admin of admins) {
+          await notifSvc.create(admin.id, storeId, {
+            type: 'RECEIPT_APPROVAL',
+            message: `Receipt ${receipt.receipt_number} of ₹${receipt.total_amount} payment requires approval`,
+            referenceId: id, referenceType: 'RECEIPT'
+          });
+        }
+      } catch(e) {}
+    } else {
+      await conn.query(
+        "UPDATE receipts SET status = 'PAID', payment_mode = ?, payment_date = COALESCE(payment_date, ?), paid_amount = total_amount WHERE id = ?",
+        [finalMode, today, id]
+      );
+      await conn.query(
+        "UPDATE transactions SET status = 'SUCCESS', payment_mode = ?, amount = ? WHERE type = 'RECEIPT' AND reference_id = ?",
+        [finalMode, receipt.total_amount, id]
+      );
+      // Also mark particulars as fully paid
+      await conn.query(
+        'UPDATE receipt_particulars SET paid_amount = amount WHERE receipt_id = ?',
+        [id]
+      );
+      await conn.commit();
+      await audit.log({ storeId, userId, action: 'RECEIPT_MARKED_PAID', entityType: 'RECEIPT', entityId: id,
+        details: { receipt_number: receipt.receipt_number, amount: receipt.total_amount, payment_mode: finalMode } });
+    }
     return getById(id, storeId);
   } catch (e) {
     await conn.rollback();
@@ -367,11 +461,50 @@ const collectRemaining = async (id, storeId, userId, paymentMode, paymentDate) =
 
   const finalMode = paymentMode || receipt.payment_mode;
   if (!finalMode) throw new Error('PAYMENT_MODE_REQUIRED');
+  if (receipt.receipt_state === 'PENDING_APPROVAL') throw new Error('ALREADY_PENDING_APPROVAL');
   const today = new Date().toISOString().split('T')[0];
+
+  // Cash approval check on the remaining amount — same rule as create() / markPaid()
+  const [[settings]] = await db.query(
+    'SELECT auto_approve_cash, cash_approval_limit FROM store_settings WHERE store_id = ?',
+    [storeId]
+  );
+  const needsApproval = finalMode === 'CASH'
+    && settings
+    && !settings.auto_approve_cash
+    && remaining > Number(settings.cash_approval_limit || 0);
 
   const conn = await db.getConnection();
   await conn.beginTransaction();
   try {
+    if (needsApproval) {
+      // Send remaining payment for approval
+      await conn.query(
+        "UPDATE receipts SET receipt_state = 'PENDING_APPROVAL', payment_mode = ? WHERE id = ?",
+        [finalMode, id]
+      );
+      await conn.commit();
+      await audit.log({ storeId, userId, action: 'RECEIPT_COLLECT_PENDING_APPROVAL', entityType: 'RECEIPT', entityId: id,
+        details: { receipt_number: receipt.receipt_number, remaining_amount: remaining, payment_mode: finalMode } });
+      try {
+        const [admins] = await db.query(
+          `SELECT u.id FROM users u JOIN user_roles ur ON ur.user_id = u.id
+           JOIN roles r ON r.id = ur.role_id
+           WHERE ur.store_id = ? AND r.name IN ('STORE_ADMIN','SUB_ADMIN') AND u.id != ?`,
+          [storeId, userId]
+        );
+        for (const admin of admins) {
+          await notifSvc.create(admin.id, storeId, {
+            type: 'RECEIPT_APPROVAL',
+            message: `Remaining ₹${remaining} for receipt ${receipt.receipt_number} requires approval`,
+            referenceId: id, referenceType: 'RECEIPT'
+          });
+        }
+      } catch(e) {}
+      conn.release();
+      return getById(id, storeId);
+    }
+
     const [particulars] = await conn.query(
       'SELECT id, amount, paid_amount FROM receipt_particulars WHERE receipt_id = ? ORDER BY id', [id]
     );
