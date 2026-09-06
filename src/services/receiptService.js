@@ -531,7 +531,6 @@ const collectRemaining = async (id, storeId, userId, paymentMode, paymentDate) =
           });
         }
       } catch(e) {}
-      conn.release();
       return getById(id, storeId);
     }
 

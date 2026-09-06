@@ -46,7 +46,7 @@ const login = async ({ identifier, password }) => {
         'UPDATE users SET otp_code = ?, otp_expires_at = ? WHERE id = ?',
         [otp, new Date(Date.now() + 5 * 60 * 1000), user.id]
       );
-      return { ...response, requirePasswordChange: true, otpEnabled: true, otp }; // otp for dev only
+      return { ...response, requirePasswordChange: true, otpEnabled: true };
     }
     return { ...response, requirePasswordChange: true, otpEnabled: false };
   }

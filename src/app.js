@@ -7,9 +7,22 @@ const cookieParser = require('cookie-parser');
 
 const app = express();
 
+// Rate limiters (C1 FIX)
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: 'Too many login attempts, please try again later'
+});
+const otpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: 'Too many OTP requests, please try again later'
+});
+
 // Middleware
 app.use(cookieParser());
 app.use(express.json());
+app.use(cors());
 app.use(csrf({ cookie: true }));
 
 // CSRF token endpoint
@@ -64,7 +77,6 @@ app.use('/api/dashboard',      require('./routes/dashboardRoutes'));
 app.use('/api/notifications',  require('./routes/notificationRoutes'));
 app.use('/api/news-events',    require('./routes/newsEventRoutes'));
 app.use('/api/reports',        require('./routes/reportRoutes'));
-app.use('/api/payments',       require('./routes/paymentRoutes'));
 app.use('/api/payments',       require('./routes/paymentRoutes'));
 app.use('/api/user-profile',   require('./routes/userProfileRoutes'));
 
