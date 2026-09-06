@@ -54,6 +54,7 @@ const getById = async (id, storeId) => {
 };
 
 const getByDateRange = async (storeId, startDate, endDate) => {
+  if (!startDate || !endDate) throw new Error('START_DATE_AND_END_DATE_REQUIRED');
   const [rows] = await db.query(
     `SELECT ch.*, s.name as supplier_name
      FROM challans ch
@@ -73,10 +74,23 @@ const create = async (data, storeId, userId) => {
   try {
     const challanNumber = await _generateChallanNumber(storeId, conn);
 
+    const [[settings]] = await conn.query(
+      'SELECT auto_approve_cash, cash_approval_limit FROM store_settings WHERE store_id = ?',
+      [storeId]
+    );
+
+    const needsApproval = data.paymentMode === 'CASH'
+      && settings
+      && !settings.auto_approve_cash
+      && Number(data.totalAmount) > Number(settings.cash_approval_limit || 0);
+
+    const challanState = needsApproval ? 'PENDING_APPROVAL' : 'APPROVED';
+    const status = 'UNPAID';
+
     const [result] = await conn.query(
-      `INSERT INTO challans (store_id, challan_number, supplier_id, total_amount, payment_mode, status, created_by)
-       VALUES (?, ?, ?, ?, ?, 'UNPAID', ?)`,
-      [storeId, challanNumber, data.supplierId, data.totalAmount, data.paymentMode, userId]
+      `INSERT INTO challans (store_id, challan_number, supplier_id, total_amount, payment_mode, challan_state, status, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [storeId, challanNumber, data.supplierId, data.totalAmount, data.paymentMode, challanState, status, userId]
     );
     const challanId = result.insertId;
 
@@ -89,13 +103,31 @@ const create = async (data, storeId, userId) => {
     }
 
     await conn.query(
-      "INSERT INTO transactions (store_id, type, reference_id, amount, payment_mode, status) VALUES (?, 'CHALLAN', ?, ?, ?, 'SUCCESS')",
+      "INSERT INTO transactions (store_id, type, reference_id, amount, payment_mode, status) VALUES (?, 'CHALLAN', ?, ?, ?, 'INITIATED')",
       [storeId, challanId, data.totalAmount, data.paymentMode]
     );
 
     await conn.commit();
     await audit.log({ storeId, userId, action: 'CHALLAN_CREATED', entityType: 'CHALLAN', entityId: challanId,
-      details: { challan_number: challanNumber, amount: data.totalAmount, supplier_id: data.supplierId } });
+      details: { challan_number: challanNumber, amount: data.totalAmount, supplier_id: data.supplierId, state: challanState } });
+
+    if (challanState === 'PENDING_APPROVAL') {
+      try {
+        const [admins] = await db.query(
+          `SELECT u.id FROM users u JOIN user_roles ur ON ur.user_id = u.id
+           JOIN roles r ON r.id = ur.role_id
+           WHERE ur.store_id = ? AND r.name IN ('STORE_ADMIN','SUB_ADMIN') AND u.id != ?`,
+          [storeId, userId]
+        );
+        for (const admin of admins) {
+          await notifSvc.create(admin.id, storeId, {
+            type: 'CHALLAN_APPROVAL',
+            message: `New challan ${challanNumber} of ₹${data.totalAmount} requires approval`,
+            referenceId: challanId, referenceType: 'CHALLAN'
+          });
+        }
+      } catch(e) {}
+    }
     return getById(challanId, storeId);
   } catch (e) {
     await conn.rollback();
@@ -105,26 +137,33 @@ const create = async (data, storeId, userId) => {
   }
 };
 
-// No direct update/delete — must go through change_requests
-
-// Reject a challan (UNPAID → REJECTED)
-const rejectChallan = async (id, storeId, userId, note) => {
+// Approve challan (PENDING_APPROVAL → APPROVED)
+const approveChallan = async (id, storeId, userId, note) => {
   const [[challan]] = await db.query(
     'SELECT * FROM challans WHERE id = ? AND store_id = ?', [id, storeId]
   );
   if (!challan) throw new Error('CHALLAN_NOT_FOUND');
-  if (challan.status === 'PAID') throw new Error('CANNOT_REJECT_PAID_CHALLAN');
+  if (challan.challan_state !== 'PENDING_APPROVAL') throw new Error('NOT_PENDING_APPROVAL');
 
   const conn = await db.getConnection();
   await conn.beginTransaction();
   try {
-    await conn.query("UPDATE challans SET status = 'CANCELLED', cancel_reason = ? WHERE id = ?", [note || 'Rejected', id]);
     await conn.query(
-      "UPDATE transactions SET status = 'FAILED' WHERE type = 'CHALLAN' AND reference_id = ?", [id]
+      "UPDATE challans SET challan_state = 'APPROVED' WHERE id = ?", [id]
+    );
+    await conn.query(
+      "UPDATE transactions SET status = 'SUCCESS' WHERE type = 'CHALLAN' AND reference_id = ?", [id]
     );
     await conn.commit();
-    await audit.log({ storeId, userId, action: 'CHALLAN_CANCELLED', entityType: 'CHALLAN', entityId: id,
-      details: { challan_number: challan.challan_number, amount: challan.total_amount, reason: note } });
+    await audit.log({ storeId, userId, action: 'CHALLAN_APPROVED', entityType: 'CHALLAN', entityId: id,
+      details: { challan_number: challan.challan_number, amount: challan.total_amount, note } });
+    try {
+      await notifSvc.create(challan.created_by, storeId, {
+        type: 'SUCCESS',
+        message: `Challan ${challan.challan_number} of ₹${challan.total_amount} has been approved`,
+        referenceId: id, referenceType: 'CHALLAN'
+      });
+    } catch(e) {}
     return getById(id, storeId);
   } catch (e) {
     await conn.rollback();
@@ -134,15 +173,49 @@ const rejectChallan = async (id, storeId, userId, note) => {
   }
 };
 
+// Reject challan (PENDING_APPROVAL → REJECTED)
+const rejectChallan = async (id, storeId, userId, note) => {
+  const [[challan]] = await db.query(
+    'SELECT * FROM challans WHERE id = ? AND store_id = ?', [id, storeId]
+  );
+  if (!challan) throw new Error('CHALLAN_NOT_FOUND');
+  if (challan.challan_state !== 'PENDING_APPROVAL') throw new Error('NOT_PENDING_APPROVAL');
+
+  const conn = await db.getConnection();
+  await conn.beginTransaction();
+  try {
+    await conn.query("UPDATE challans SET challan_state = 'REJECTED', status = 'REJECTED' WHERE id = ?", [id]);
+    await conn.query(
+      "UPDATE transactions SET status = 'FAILED' WHERE type = 'CHALLAN' AND reference_id = ?", [id]
+    );
+    await conn.commit();
+    await audit.log({ storeId, userId, action: 'CHALLAN_REJECTED', entityType: 'CHALLAN', entityId: id,
+      details: { challan_number: challan.challan_number, amount: challan.total_amount, note } });
+    try {
+      await notifSvc.create(challan.created_by, storeId, {
+        type: 'ERROR',
+        message: `Challan ${challan.challan_number} of ₹${challan.total_amount} has been rejected${note ? ': ' + note : ''}`,
+        referenceId: id, referenceType: 'CHALLAN'
+      });
+    } catch(e) {}
+    return getById(id, storeId);
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
+};
 
 // Mark challan as paid (UNPAID → PAID)
-const approveChallan = async (id, storeId, userId) => {
+const markChallanPaid = async (id, storeId, userId) => {
   const [[challan]] = await db.query(
     'SELECT * FROM challans WHERE id = ? AND store_id = ?', [id, storeId]
   );
   if (!challan) throw new Error('CHALLAN_NOT_FOUND');
   if (challan.status === 'PAID') throw new Error('ALREADY_PAID');
-  if (challan.status === 'CANCELLED') throw new Error('CHALLAN_CANCELLED');
+  if (challan.challan_state === 'PENDING_APPROVAL') throw new Error('CHALLAN_PENDING_APPROVAL');
+  if (['REJECTED', 'CANCELLED'].includes(challan.challan_state)) throw new Error('CANNOT_PAY_REJECTED_OR_CANCELLED_CHALLAN');
 
   const conn = await db.getConnection();
   await conn.beginTransaction();
@@ -152,7 +225,7 @@ const approveChallan = async (id, storeId, userId) => {
       "UPDATE transactions SET status = 'SUCCESS' WHERE type = 'CHALLAN' AND reference_id = ?", [id]
     );
     await conn.commit();
-    await audit.log({ storeId, userId, action: 'CHALLAN_PAID', entityType: 'CHALLAN', entityId: id,
+    await audit.log({ storeId, userId, action: 'CHALLAN_MARKED_PAID', entityType: 'CHALLAN', entityId: id,
       details: { challan_number: challan.challan_number, amount: challan.total_amount } });
     return getById(id, storeId);
   } catch (e) {
@@ -163,4 +236,4 @@ const approveChallan = async (id, storeId, userId) => {
   }
 };
 
-module.exports = { getAll, getById, create, getByDateRange, rejectChallan, approveChallan };
+module.exports = { getAll, getById, create, getByDateRange, approveChallan, rejectChallan, markChallanPaid };

@@ -32,7 +32,7 @@ const _checkLockPeriod = async (storeId) => {
 
 // ── Read ─────────────────────────────────────────────────────
 const getAll = async (storeId, filters = {}) => {
-  const { search, status, receipt_state, startDate, endDate } = filters;
+  const { search, status, receipt_state, startDate, endDate, limit = 50, offset = 0 } = filters;
   const conditions = ['r.store_id = ?'];
   const params = [storeId];
 
@@ -46,6 +46,17 @@ const getAll = async (storeId, filters = {}) => {
   if (startDate) { conditions.push('DATE(r.created_at) >= ?'); params.push(startDate); }
   if (endDate) { conditions.push('DATE(r.created_at) <= ?'); params.push(endDate); }
 
+  const finalLimit = Math.min(Number(limit) || 50, 500);
+  const finalOffset = Math.max(Number(offset) || 0, 0);
+
+  const [[{ total }]] = await db.query(
+    `SELECT COUNT(*) as total FROM receipts r
+     JOIN customers c ON c.id = r.customer_id
+     JOIN customer_store_access csa ON csa.customer_id = c.id AND csa.store_id = r.store_id
+     WHERE ${conditions.join(' AND ')}`,
+    params
+  );
+
   const [rows] = await db.query(
     `SELECT r.*, c.name as customer_name, c.mobile as customer_mobile,
             csa.account_number, u.name as created_by_name
@@ -54,10 +65,11 @@ const getAll = async (storeId, filters = {}) => {
      JOIN customer_store_access csa ON csa.customer_id = c.id AND csa.store_id = r.store_id
      JOIN users u ON u.id = r.created_by
      WHERE ${conditions.join(' AND ')}
-     ORDER BY r.created_at DESC`,
-    params
+     ORDER BY r.created_at DESC
+     LIMIT ? OFFSET ?`,
+    [...params, finalLimit, finalOffset]
   );
-  return rows;
+  return { rows, total, limit: finalLimit, offset: finalOffset };
 };
 
 const getById = async (id, storeId) => {
@@ -80,20 +92,25 @@ const getById = async (id, storeId) => {
   return receipt;
 };
 
-const getPendingApprovals = async (storeId) => {
+const getPendingApprovals = async (storeId, limit = 50, offset = 0) => {
+  const finalLimit = Math.min(Number(limit) || 50, 500);
+  const finalOffset = Math.max(Number(offset) || 0, 0);
   const [rows] = await db.query(
     `SELECT r.*, c.name as customer_name, c.mobile as customer_mobile
      FROM receipts r
      JOIN customers c ON c.id = r.customer_id
      WHERE r.store_id = ? AND r.receipt_state = 'PENDING_APPROVAL'
-     ORDER BY r.created_at DESC`,
-    [storeId]
+     ORDER BY r.created_at DESC
+     LIMIT ? OFFSET ?`,
+    [storeId, finalLimit, finalOffset]
   );
   return rows;
 };
 
-const getByDateRange = async (storeId, startDate, endDate) => {
+const getByDateRange = async (storeId, startDate, endDate, limit = 50, offset = 0) => {
   if (!startDate || !endDate) throw new Error('START_DATE_AND_END_DATE_REQUIRED');
+  const finalLimit = Math.min(Number(limit) || 50, 500);
+  const finalOffset = Math.max(Number(offset) || 0, 0);
   const [rows] = await db.query(
     `SELECT r.*, c.name as customer_name, c.mobile as customer_mobile,
             csa.account_number, u.name as created_by_name
@@ -102,8 +119,9 @@ const getByDateRange = async (storeId, startDate, endDate) => {
      JOIN customer_store_access csa ON csa.customer_id = c.id AND csa.store_id = r.store_id
      JOIN users u ON u.id = r.created_by
      WHERE r.store_id = ? AND DATE(r.created_at) BETWEEN ? AND ?
-     ORDER BY r.created_at DESC`,
-    [storeId, startDate, endDate]
+     ORDER BY r.created_at DESC
+     LIMIT ? OFFSET ?`,
+    [storeId, startDate, endDate, finalLimit, finalOffset]
   );
   return rows;
 };
@@ -147,10 +165,13 @@ const create = async (data, storeId, userId) => {
       [storeId]
     );
 
-    // Due receipt — always PENDING, UNPAID, no payment mode needed
+    // Due receipt — apply cash approval check too
     let receiptState, status;
     if (isDue) {
-      receiptState = 'APPROVED'; // approved but unpaid
+      const needsApproval = settings
+        && !settings.auto_approve_cash
+        && Number(data.totalAmount) > Number(settings.cash_approval_limit || 0);
+      receiptState = needsApproval ? 'PENDING_APPROVAL' : 'APPROVED';
       status = 'UNPAID';
     } else {
       const needsApproval = data.paymentMode === 'CASH'
@@ -294,7 +315,7 @@ const rejectReceipt = async (id, storeId, userId, note) => {
   await conn.beginTransaction();
   try {
     await conn.query(
-      "UPDATE receipts SET receipt_state = 'REJECTED' WHERE id = ?", [id]
+      "UPDATE receipts SET receipt_state = 'REJECTED', status = 'REJECTED' WHERE id = ?", [id]
     );
     await conn.query(
       "INSERT INTO receipt_approvals (receipt_id, approved_by, action, note) VALUES (?, ?, 'REJECTED', ?)",
@@ -306,6 +327,14 @@ const rejectReceipt = async (id, storeId, userId, note) => {
     await conn.commit();
     await audit.log({ storeId, userId, action: 'RECEIPT_REJECTED', entityType: 'RECEIPT', entityId: id,
       details: { receipt_number: receipt.receipt_number, amount: receipt.total_amount, note } });
+    // Notify receipt creator of rejection
+    try {
+      await notifSvc.create(receipt.created_by, storeId, {
+        type: 'ERROR',
+        message: `Receipt ${receipt.receipt_number} of ₹${receipt.total_amount} has been rejected${note ? ': ' + note : ''}`,
+        referenceId: id, referenceType: 'RECEIPT'
+      });
+    } catch(e) {}
     return getById(id, storeId);
   } catch (e) {
     await conn.rollback();
@@ -370,6 +399,7 @@ const markPaid = async (id, storeId, userId, paymentMode) => {
   if (!receipt) throw new Error('RECEIPT_NOT_FOUND');
   if (receipt.status === 'PAID') throw new Error('ALREADY_PAID');
   if (receipt.receipt_state === 'PENDING_APPROVAL') throw new Error('ALREADY_PENDING_APPROVAL');
+  if (['REJECTED', 'CANCELLED'].includes(receipt.receipt_state)) throw new Error('CANNOT_PAY_REJECTED_OR_CANCELLED_RECEIPT');
   if (!receipt.payment_mode && !paymentMode) throw new Error('PAYMENT_MODE_REQUIRED');
 
   const finalMode = paymentMode || receipt.payment_mode;
