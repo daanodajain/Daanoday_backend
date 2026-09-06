@@ -1,6 +1,12 @@
 const svc = require('../services/customerAuthService');
 const { success, error } = require('../utils/response');
 
+// GET /customer-auth/config — public, returns login config flags
+const getConfig = async (req, res) => {
+  try { success(res, await svc.getLoginConfig()); }
+  catch (e) { error(res, e.message, 400); }
+};
+
 const sendOtp = async (req, res) => {
   try { success(res, await svc.sendOtp(req.body.mobile)); }
   catch (e) { error(res, e.message, 400); }
@@ -16,4 +22,4 @@ const getMyReceipts = async (req, res) => {
   catch (e) { error(res, e.message, 400); }
 };
 
-module.exports = { sendOtp, login, getMyReceipts };
+module.exports = { getConfig, sendOtp, login, getMyReceipts };

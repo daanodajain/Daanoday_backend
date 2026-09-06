@@ -4,26 +4,49 @@ const { generateToken, generateRefreshToken } = require('../utils/jwt');
 
 const generateOtp = () => Math.floor(100000 + Math.random() * 900000).toString();
 
+// Check if OTP login is enabled from system_settings
+const isOtpLoginEnabled = async () => {
+  const [[row]] = await db.query(
+    "SELECT setting_value FROM system_settings WHERE setting_key = 'CUSTOMER_OTP_LOGIN_ENABLED'",
+    []
+  );
+  if (!row) return true; // default ON if setting not found
+  return row.setting_value === 'true';
+};
+
 const sendOtp = async (mobile) => {
   const [[customer]] = await db.query('SELECT id, first_login FROM customers WHERE mobile = ?', [mobile]);
   if (!customer) throw new Error('CUSTOMER_NOT_FOUND');
+
+  const otpEnabled = await isOtpLoginEnabled();
+
+  // If OTP disabled and it's first login → skip OTP, just signal direct password setup
+  if (!otpEnabled && customer.first_login) {
+    return { firstLogin: true, otpEnabled: false };
+  }
 
   const otp = generateOtp();
   await db.query(
     'UPDATE customers SET otp_code = ?, otp_expires_at = ? WHERE id = ?',
     [otp, new Date(Date.now() + 5 * 60 * 1000), customer.id]
   );
-  return { firstLogin: !!customer.first_login, otp }; // otp returned for dev; send via SMS in prod
+  return { firstLogin: !!customer.first_login, otpEnabled, otp }; // otp returned for dev; send via SMS in prod
 };
 
 const login = async ({ mobile, password, otp, newPassword }) => {
   const [[customer]] = await db.query('SELECT * FROM customers WHERE mobile = ?', [mobile]);
   if (!customer) throw new Error('CUSTOMER_NOT_FOUND');
 
+  const otpEnabled = await isOtpLoginEnabled();
+
   if (customer.first_login) {
-    if (!otp) throw new Error('OTP_REQUIRED');
-    if (customer.otp_code !== otp || new Date(customer.otp_expires_at) < new Date())
-      throw new Error('INVALID_OTP');
+    if (otpEnabled) {
+      // OTP flow: verify OTP first, then set password
+      if (!otp) throw new Error('OTP_REQUIRED');
+      if (customer.otp_code !== otp || new Date(customer.otp_expires_at) < new Date())
+        throw new Error('INVALID_OTP');
+    }
+    // Both flows: set new password
     if (!newPassword) throw new Error('NEW_PASSWORD_REQUIRED');
     const hash = await bcrypt.hash(newPassword, 10);
     await db.query(
@@ -48,7 +71,7 @@ const _buildResponse = async (customer) => {
     [customer.id]
   );
   return {
-    customer: { id: customer.id, name: customer.name, mobile: customer.mobile },
+    customer: { id: customer.id, name: customer.name, mobile: customer.mobile, email: customer.email },
     storeAccess,
     token: generateToken({ userId: customer.id, mobile: customer.mobile, userType: 'CUSTOMER' }),
     refreshToken: generateRefreshToken({ userId: customer.id, mobile: customer.mobile, userType: 'CUSTOMER' }),
@@ -69,4 +92,8 @@ const getMyReceipts = async (customerId) => {
   return rows;
 };
 
-module.exports = { sendOtp, login, getMyReceipts };
+const getLoginConfig = async () => ({
+  otpEnabled: await isOtpLoginEnabled(),
+});
+
+module.exports = { getLoginConfig, sendOtp, login, getMyReceipts };
