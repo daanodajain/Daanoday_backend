@@ -46,4 +46,9 @@ const unlockHandler = async (req, res) => {
   }
 };
 
-module.exports = { loginHandler, changePasswordHandler, refreshHandler, logoutHandler, unlockHandler };
+const verifyFirstLoginOtpHandler = async (req, res) => {
+  try { success(res, await svc.verifyFirstLoginOtp(req.user.userId, req.body.otp)); }
+  catch (e) { error(res, e.message, 400); }
+};
+
+module.exports = { loginHandler, changePasswordHandler, refreshHandler, logoutHandler, unlockHandler, verifyFirstLoginOtpHandler };

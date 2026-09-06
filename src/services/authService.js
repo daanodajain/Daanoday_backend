@@ -3,6 +3,8 @@ const db = require('../config/db');
 const { generateToken, generateRefreshToken } = require('../utils/jwt');
 
 // Login with email OR mobile + password
+const { getBoolSetting } = require('../utils/systemSettings');
+
 const login = async ({ identifier, password }) => {
   if (!identifier || !password) throw new Error('CREDENTIALS_REQUIRED');
 
@@ -28,9 +30,19 @@ const login = async ({ identifier, password }) => {
 
   const response = await _buildLoginResponse(user);
 
-  // If first_login — signal frontend to show change password
+  // If first_login — signal frontend to show change password (with OTP step if enabled)
   if (user.first_login) {
-    return { ...response, requirePasswordChange: true };
+    const otpEnabled = await getBoolSetting('OTP_LOGIN_ENABLED', false);
+    if (otpEnabled) {
+      // Generate OTP and store it (in prod: send via SMS/email)
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      await db.query(
+        'UPDATE users SET otp_code = ?, otp_expires_at = ? WHERE id = ?',
+        [otp, new Date(Date.now() + 5 * 60 * 1000), user.id]
+      );
+      return { ...response, requirePasswordChange: true, otpEnabled: true, otp }; // otp for dev only
+    }
+    return { ...response, requirePasswordChange: true, otpEnabled: false };
   }
 
   return response;
@@ -118,4 +130,15 @@ const refreshToken = async (token) => {
   return _buildLoginResponse(user);
 };
 
-module.exports = { login, changePassword, refreshToken, verifyUnlockPassword };
+// Verify OTP for staff first login (OTP_LOGIN_ENABLED=true flow)
+const verifyFirstLoginOtp = async (userId, otp) => {
+  const [[user]] = await db.query('SELECT id, otp_code, otp_expires_at FROM users WHERE id = ?', [userId]);
+  if (!user) throw new Error('USER_NOT_FOUND');
+  if (!user.otp_code || user.otp_code !== otp || new Date(user.otp_expires_at) < new Date())
+    throw new Error('INVALID_OTP');
+  // Clear OTP after successful verify
+  await db.query('UPDATE users SET otp_code = NULL, otp_expires_at = NULL WHERE id = ?', [userId]);
+  return { verified: true };
+};
+
+module.exports = { login, changePassword, refreshToken, verifyUnlockPassword, verifyFirstLoginOtp };
