@@ -13,7 +13,12 @@ const login = async ({ identifier, password }) => {
     'SELECT * FROM users WHERE email = ? OR mobile = ?',
     [identifier, identifier]
   );
-  if (!user) throw new Error('USER_NOT_FOUND');
+
+  // Not a staff user? One login page serves everyone — fall back to the
+  // customers table before giving up, so customers can log in from the
+  // same form instead of needing a separate endpoint/page.
+  if (!user) return _customerFallbackLogin(identifier, password);
+
   if (!user.active) throw new Error('ACCOUNT_INACTIVE');
 
   if (user.account_locked_until && new Date(user.account_locked_until) > new Date())
@@ -29,6 +34,7 @@ const login = async ({ identifier, password }) => {
   await db.query('UPDATE users SET failed_login_attempts = 0 WHERE id = ?', [user.id]);
 
   const response = await _buildLoginResponse(user);
+  response.user.userType = 'STAFF';
 
   // If first_login — signal frontend to show change password (with OTP step if enabled)
   if (user.first_login) {
@@ -57,6 +63,46 @@ const changePassword = async (userId, newPassword) => {
   );
   const [[user]] = await db.query('SELECT * FROM users WHERE id = ?', [userId]);
   return _buildLoginResponse(user);
+};
+
+// Same login form, customer identity: checked only when the identifier
+// doesn't match any staff user. Mirrors customerAuthService.login's
+// returning-customer path, but keyed by email OR mobile (staff-style).
+const _customerFallbackLogin = async (identifier, password) => {
+  const [[customer]] = await db.query(
+    'SELECT * FROM customers WHERE email = ? OR mobile = ?',
+    [identifier, identifier]
+  );
+  if (!customer) throw new Error('USER_NOT_FOUND');
+
+  // First-time customer hasn't set a password yet — they still need the
+  // one-time OTP setup step (separate from day-to-day login).
+  if (customer.first_login || !customer.password_hash) {
+    throw new Error('CUSTOMER_FIRST_LOGIN_SETUP_REQUIRED');
+  }
+
+  const valid = await bcrypt.compare(password, customer.password_hash);
+  if (!valid) throw new Error('INVALID_PASSWORD');
+
+  const [storeAccess] = await db.query(
+    `SELECT csa.store_id, csa.account_number, csa.is_primary_store, s.name as store_name
+     FROM customer_store_access csa
+     JOIN stores s ON s.id = csa.store_id
+     WHERE csa.customer_id = ?`,
+    [customer.id]
+  );
+
+  return {
+    user: {
+      id: customer.id, name: customer.name, email: customer.email,
+      mobile: customer.mobile, userType: 'CUSTOMER',
+    },
+    roles: [],
+    stores: [],
+    storeAccess,
+    token: generateToken({ userId: customer.id, mobile: customer.mobile, userType: 'CUSTOMER' }),
+    refreshToken: generateRefreshToken({ userId: customer.id, mobile: customer.mobile, userType: 'CUSTOMER' }),
+  };
 };
 
 const _incrementFailedAttempts = async (user) => {

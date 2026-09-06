@@ -5,8 +5,11 @@ const { getBoolSetting } = require('../utils/systemSettings');
 
 const generateOtp = () => Math.floor(100000 + Math.random() * 900000).toString();
 
-const sendOtp = async (mobile) => {
-  const [[customer]] = await db.query('SELECT id, first_login FROM customers WHERE mobile = ?', [mobile]);
+const sendOtp = async (identifier) => {
+  const [[customer]] = await db.query(
+    'SELECT id, first_login FROM customers WHERE mobile = ? OR email = ?',
+    [identifier, identifier]
+  );
   if (!customer) throw new Error('CUSTOMER_NOT_FOUND');
 
   const otpEnabled = await getBoolSetting('OTP_LOGIN_ENABLED', false);
@@ -30,8 +33,14 @@ const sendOtp = async (mobile) => {
   return { firstLogin: true, otpEnabled: true, otp }; // otp in response for dev; send via SMS in prod
 };
 
-const login = async ({ mobile, password, otp, newPassword }) => {
-  const [[customer]] = await db.query('SELECT * FROM customers WHERE mobile = ?', [mobile]);
+const login = async ({ identifier, mobile, password, otp, newPassword }) => {
+  // Accept either the new `identifier` field (mobile OR email) or the
+  // older `mobile`-only field, so existing callers keep working.
+  const lookupValue = identifier || mobile;
+  const [[customer]] = await db.query(
+    'SELECT * FROM customers WHERE mobile = ? OR email = ?',
+    [lookupValue, lookupValue]
+  );
   if (!customer) throw new Error('CUSTOMER_NOT_FOUND');
 
   const otpEnabled = await getBoolSetting('OTP_LOGIN_ENABLED', false);

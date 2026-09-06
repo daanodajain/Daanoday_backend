@@ -8,7 +8,7 @@ const getConfig = async (req, res) => {
 };
 
 const sendOtp = async (req, res) => {
-  try { success(res, await svc.sendOtp(req.body.mobile)); }
+  try { success(res, await svc.sendOtp(req.body.identifier || req.body.mobile)); }
   catch (e) { error(res, e.message, 400); }
 };
 
