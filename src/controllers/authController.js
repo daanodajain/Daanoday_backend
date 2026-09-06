@@ -47,7 +47,8 @@ const unlockHandler = async (req, res) => {
 };
 
 const verifyFirstLoginOtpHandler = async (req, res) => {
-  try { success(res, await svc.verifyFirstLoginOtp(req.user.userId, req.body.otp)); }
+  const svc = require('../services/authService');
+  try { success(res, await svc.verifyFirstLoginOtp(req.user.id, req.body.otp)); }
   catch (e) { error(res, e.message, 400); }
 };
 

@@ -113,15 +113,15 @@ const getPendingApprovals = async (storeId) => {
      ORDER BY r.created_at DESC`,
     [storeId]
   );
-  const [changeRequests] = await db.query(
-    `SELECT cr.id, cr.entity_type, cr.change_type, cr.created_at, u.name as created_by_name
+  const [pending] = await db.query(
+    `SELECT cr.id, cr.entity_type, cr.action, cr.created_at, u.name as created_by_name
      FROM change_requests cr
-     JOIN users u ON u.id = cr.created_by
+     JOIN users u ON u.id = cr.requested_by
      WHERE cr.store_id = ? AND cr.status = 'PENDING'
      ORDER BY cr.created_at DESC`,
     [storeId]
   );
-  return { receipts, changeRequests };
+  return { receipts, changeRequests: pending };
 };
 
 const getReceiptTypeDistribution = async (storeId) => {

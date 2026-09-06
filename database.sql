@@ -59,10 +59,12 @@ CREATE TABLE users (
   email                  VARCHAR(255) UNIQUE,
   mobile                 VARCHAR(15) UNIQUE,
   password_hash          VARCHAR(255),
+  otp_code               VARCHAR(6) DEFAULT NULL,
+  otp_expires_at         TIMESTAMP NULL DEFAULT NULL,
   first_login            BOOLEAN DEFAULT TRUE,
   failed_login_attempts  INT DEFAULT 0,
   account_locked_until   TIMESTAMP NULL,
-  linked_customer_id     BIGINT NULL,   -- FK added after customers table
+  linked_customer_id     BIGINT NULL,
   active                 BOOLEAN DEFAULT TRUE,
   created_at             TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_users_mobile (mobile),
@@ -76,12 +78,14 @@ CREATE TABLE customers (
   id            BIGINT PRIMARY KEY AUTO_INCREMENT,
   name          VARCHAR(255) NOT NULL,
   mobile        VARCHAR(15) NOT NULL,
+  email         VARCHAR(255) DEFAULT NULL,
   password_hash VARCHAR(255),
   first_login   BOOLEAN DEFAULT TRUE,
   otp_code      VARCHAR(6),
   otp_expires_at TIMESTAMP NULL,
   created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE KEY uniq_mobile (mobile)
+  UNIQUE KEY uniq_mobile (mobile),
+  UNIQUE KEY uniq_customer_email (email)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Now add FK from users → customers
@@ -126,6 +130,8 @@ CREATE TABLE store_settings (
   auto_send_receipt_email BOOLEAN DEFAULT FALSE,
   session_timeout_minutes INT NULL,
   inactivity_lock_minutes INT NULL,
+  receipt_template        VARCHAR(20) DEFAULT 'DEFAULT',
+  receipt_header_text     VARCHAR(500) DEFAULT NULL,
   FOREIGN KEY (store_id) REFERENCES stores(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -487,10 +493,11 @@ INSERT INTO role_permissions (role_id, permission_id) SELECT 1, id FROM permissi
 INSERT INTO user_roles (user_id, role_id, store_id) VALUES (1, 1, NULL);
 
 -- System settings defaults
-INSERT INTO system_settings (key_name, value, category, description) VALUES
+INSERT INTO system_settings (setting_key, setting_value, category, description) VALUES
 ('MAX_STORES_PER_PLAN','10','PLAN','Max stores allowed'),
 ('SUBSCRIPTION_GRACE_DAYS','7','PLAN','Grace period after expiry'),
 ('PAYMENT_GATEWAY_ENABLED','false','PAYMENT','Global payment gateway toggle'),
 ('SMS_GATEWAY_URL','','SMS','SMS gateway endpoint'),
 ('DEFAULT_RECEIPT_PREFIX','RCP','RECEIPT','Default receipt number prefix'),
-('DEFAULT_CHALLAN_PREFIX','CHL','CHALLAN','Default challan number prefix');
+('DEFAULT_CHALLAN_PREFIX','CHL','CHALLAN','Default challan number prefix'),
+('OTP_LOGIN_ENABLED','false','AUTH','Enable OTP for first login');

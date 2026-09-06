@@ -1,21 +1,29 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
+const csrf = require('csurf');
+const cookieParser = require('cookie-parser');
 
 const app = express();
 
-// CORS — allow all origins (tighten in production)
-app.use(cors({
-  origin: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-store-id'],
-  credentials: true,
-}));
-
-// Handle preflight OPTIONS for all routes
-app.options('*', cors());
-
+// Middleware
+app.use(cookieParser());
 app.use(express.json());
+app.use(csrf({ cookie: true }));
+
+// CSRF token endpoint
+app.get('/csrf-token', (req, res) => {
+  res.json({ csrfToken: req.csrfToken() });
+});
+
+// Skip CSRF for API endpoints (they use Bearer auth)
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/')) {
+    return next();
+  }
+  next();
+});
 
 // Never let a CDN/reverse-proxy cache API responses - this is a dynamic
 // API, every response must always reflect the current DB state.
@@ -27,8 +35,8 @@ app.use('/api', (req, res, next) => {
 });
 
 // Auth (public)
-app.use('/api/auth',          require('./routes/authRoutes'));
-app.use('/api/customer-auth', require('./routes/customerAuthRoutes'));
+app.use('/api/auth',          loginLimiter, require('./routes/authRoutes'));
+app.use('/api/customer-auth', otpLimiter, require('./routes/customerAuthRoutes'));
 
 // Super Admin (no store context needed)
 app.use('/api/super-admin',   require('./routes/superAdminRoutes'));
@@ -37,7 +45,8 @@ app.use('/api/super-admin',   require('./routes/superAdminRoutes'));
 app.use('/api/store-context', require('./routes/storeContextRoutes'));
 
 // Customer self-service portal
-app.use('/api/customer-profile', require('./routes/customerProfileRoutes'));
+app.use('/api/customer-profile',  require('./routes/customerProfileRoutes'));
+app.use('/api/customer-payments', require('./routes/customerPaymentRoutes'));
 
 // Store-scoped routes (all require x-store-id header)
 app.use('/api/stores',         require('./routes/storeRoutes'));
@@ -55,6 +64,7 @@ app.use('/api/dashboard',      require('./routes/dashboardRoutes'));
 app.use('/api/notifications',  require('./routes/notificationRoutes'));
 app.use('/api/news-events',    require('./routes/newsEventRoutes'));
 app.use('/api/reports',        require('./routes/reportRoutes'));
+app.use('/api/payments',       require('./routes/paymentRoutes'));
 app.use('/api/payments',       require('./routes/paymentRoutes'));
 app.use('/api/user-profile',   require('./routes/userProfileRoutes'));
 

@@ -107,7 +107,7 @@ const _customerFallbackLogin = async (identifier, password) => {
 
 const _incrementFailedAttempts = async (user) => {
   const attempts = (user.failed_login_attempts || 0) + 1;
-  const lockUntil = attempts >= 5 ? new Date(Date.now() + 30 * 60 * 1000) : null;
+  const lockUntil = attempts >= 5 ? new Date(Date.now() + 15 * 60 * 1000) : null;
   await db.query(
     'UPDATE users SET failed_login_attempts = ?, account_locked_until = ? WHERE id = ?',
     [attempts, lockUntil, user.id]
@@ -171,6 +171,24 @@ const verifyUnlockPassword = async (userId, password) => {
 const refreshToken = async (token) => {
   const { verifyToken } = require('../utils/jwt');
   const decoded = verifyToken(token);
+  // Customer refresh
+  if (decoded.userType === 'CUSTOMER') {
+    const [[customer]] = await db.query('SELECT id, name, mobile, email FROM customers WHERE id = ?', [decoded.userId]);
+    if (!customer) throw new Error('CUSTOMER_NOT_FOUND');
+    const [storeAccess] = await db.query(
+      `SELECT csa.store_id, csa.account_number, csa.is_primary_store, s.name as store_name
+       FROM customer_store_access csa JOIN stores s ON s.id = csa.store_id
+       WHERE csa.customer_id = ?`, [customer.id]
+    );
+    const { generateToken, generateRefreshToken } = require('../utils/jwt');
+    return {
+      user: { ...customer, userType: 'CUSTOMER' },
+      roles: [], stores: [], storeAccess,
+      token: generateToken({ userId: customer.id, mobile: customer.mobile, userType: 'CUSTOMER' }),
+      refreshToken: generateRefreshToken({ userId: customer.id, mobile: customer.mobile, userType: 'CUSTOMER' }),
+    };
+  }
+  // Staff refresh
   const [[user]] = await db.query('SELECT * FROM users WHERE id = ?', [decoded.userId]);
   if (!user || !user.active) throw new Error('USER_NOT_FOUND');
   return _buildLoginResponse(user);
@@ -178,11 +196,12 @@ const refreshToken = async (token) => {
 
 // Verify OTP for staff first login (OTP_LOGIN_ENABLED=true flow)
 const verifyFirstLoginOtp = async (userId, otp) => {
+  if (!otp || otp.length !== 6) throw new Error('INVALID_OTP_FORMAT');
   const [[user]] = await db.query('SELECT id, otp_code, otp_expires_at FROM users WHERE id = ?', [userId]);
   if (!user) throw new Error('USER_NOT_FOUND');
-  if (!user.otp_code || user.otp_code !== otp || new Date(user.otp_expires_at) < new Date())
-    throw new Error('INVALID_OTP');
-  // Clear OTP after successful verify
+  if (!user.otp_code) throw new Error('NO_OTP_GENERATED');
+  if (user.otp_code !== otp) throw new Error('INVALID_OTP');
+  if (new Date(user.otp_expires_at) < new Date()) throw new Error('OTP_EXPIRED');
   await db.query('UPDATE users SET otp_code = NULL, otp_expires_at = NULL WHERE id = ?', [userId]);
   return { verified: true };
 };
