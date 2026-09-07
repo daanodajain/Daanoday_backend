@@ -2,8 +2,6 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
-const csrf = require('csurf');
-const cookieParser = require('cookie-parser');
 
 const app = express();
 
@@ -20,23 +18,21 @@ const otpLimiter = rateLimit({
 });
 
 // Middleware
-app.use(cookieParser());
 app.use(express.json());
 app.use(cors());
-app.use(csrf({ cookie: true }));
 
-// CSRF token endpoint
-app.get('/csrf-token', (req, res) => {
-  res.json({ csrfToken: req.csrfToken() });
-});
-
-// Skip CSRF for API endpoints (they use Bearer auth)
-app.use((req, res, next) => {
-  if (req.path.startsWith('/api/')) {
-    return next();
-  }
-  next();
-});
+// NOTE on CSRF: this API is entirely stateless Bearer-JWT (Authorization
+// header), never cookie/session based — nothing here relies on the browser
+// automatically attaching credentials, which is the exact ambient-authority
+// problem CSRF tokens defend against. A previous version applied
+// `csurf({ cookie: true })` globally to every route (including
+// /api/auth/login) and then had a no-op "skip for /api/" middleware placed
+// *after* it — both branches of that middleware called next() regardless,
+// so it never skipped anything, and csurf had already rejected the request
+// by then anyway. Since the frontend never fetched or sent a CSRF token,
+// EVERY POST/PUT/DELETE — including login itself — failed with
+// EBADCSRFTOKEN. Removed rather than "fixed", since it was solving a
+// problem this auth model doesn't have.
 
 // Never let a CDN/reverse-proxy cache API responses - this is a dynamic
 // API, every response must always reflect the current DB state.

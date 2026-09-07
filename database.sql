@@ -254,6 +254,14 @@ CREATE TABLE receipts (
   remarks        TEXT NULL,
   receipt_state  ENUM('DRAFT','PENDING_APPROVAL','APPROVED','REJECTED','CANCELLED') DEFAULT 'DRAFT',
   status         ENUM('UNPAID','PARTIAL','PAID','REJECTED') DEFAULT 'UNPAID',
+  -- Set when a customer self-reports a cash payment via the customer
+  -- portal (customer-payments/request-cash-payment) — this is the AMOUNT
+  -- THEY CLAIM to have paid a staff member in person, NOT a confirmed
+  -- payment. receipt_state moves to PENDING_APPROVAL and this column holds
+  -- the claim until a staff/admin approver verifies it actually reached
+  -- them (approve-cash-request) or rejects it (reject-cash-request) — see
+  -- receiptService.js. Never applied to paid_amount directly from here.
+  pending_cash_amount DECIMAL(12,2) NULL,
   cancel_reason  TEXT NULL,
   created_by     BIGINT NOT NULL,
   created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -299,7 +307,7 @@ CREATE TABLE challans (
   total_amount   DECIMAL(12,2) NOT NULL,
   payment_mode   ENUM('CASH','CHEQUE','ONLINE') NOT NULL,
   challan_state  ENUM('PENDING_APPROVAL','APPROVED','REJECTED','CANCELLED') DEFAULT 'APPROVED',
-  status         ENUM('UNPAID','PAID','CANCELLED') DEFAULT 'UNPAID',
+  status         ENUM('UNPAID','PAID','CANCELLED','REJECTED') DEFAULT 'UNPAID',
   cancel_reason  TEXT NULL,
   created_by     BIGINT NOT NULL,
   created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

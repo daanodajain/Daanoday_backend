@@ -169,8 +169,8 @@ const verifyUnlockPassword = async (userId, password) => {
 };
 
 const refreshToken = async (token) => {
-  const { verifyToken } = require('../utils/jwt');
-  const decoded = verifyToken(token);
+  const { verifyRefreshToken } = require('../utils/jwt');
+  const decoded = verifyRefreshToken(token);
   // Customer refresh
   if (decoded.userType === 'CUSTOMER') {
     const [[customer]] = await db.query('SELECT id, name, mobile, email FROM customers WHERE id = ?', [decoded.userId]);

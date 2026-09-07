@@ -30,7 +30,14 @@ const sendOtp = async (identifier) => {
     'UPDATE customers SET otp_code = ?, otp_expires_at = ? WHERE id = ?',
     [otp, new Date(Date.now() + 5 * 60 * 1000), customer.id]
   );
-  return { firstLogin: true, otpEnabled: true, otp }; // otp in response for dev; send via SMS in prod
+  // SECURITY (S1): never return the OTP in the API response — this is a
+  // public, pre-auth endpoint, so anyone calling it could read the OTP
+  // straight out of the JSON and skip verification entirely. No SMS/email
+  // gateway is wired up yet, so this is logged server-side as a stopgap;
+  // wire up a real provider (MSG91/Twilio/etc.) before relying on this in
+  // production — until then it only works for people with server log access.
+  console.log(`[OTP] customer ${customer.id} (${identifier}): ${otp} (expires in 5 min)`);
+  return { firstLogin: true, otpEnabled: true };
 };
 
 const login = async ({ identifier, mobile, password, otp, newPassword }) => {

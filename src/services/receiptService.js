@@ -595,4 +595,81 @@ const getApprovals = async (id, storeId) => {
   return rows;
 };
 
-module.exports = { getAll, getById, create, approveReceipt, rejectReceipt, getPendingApprovals, getByDateRange, changeState, markPaid, collectRemaining, getApprovals };
+// ── Customer-initiated cash payment claims ───────────────────
+// A customer can claim (via the customer portal) that they already paid a
+// staff member cash in person. That claim is NEVER applied directly to
+// paid_amount — it just flags the receipt for a staff/admin approver to
+// confirm (they actually physically received that cash) or reject. This
+// keeps the same principle as the cash-approval-limit: a self-reported
+// number from the person who benefits from it being higher never gets
+// trusted on its own.
+const approveCashRequest = async (id, storeId, userId) => {
+  const [[receipt]] = await db.query(
+    'SELECT * FROM receipts WHERE id = ? AND store_id = ?', [id, storeId]
+  );
+  if (!receipt) throw new Error('RECEIPT_NOT_FOUND');
+  if (receipt.receipt_state !== 'PENDING_APPROVAL' || receipt.pending_cash_amount === null) {
+    throw new Error('NO_PENDING_CASH_REQUEST');
+  }
+
+  const claimedAmount = Number(receipt.pending_cash_amount);
+  const today = new Date().toISOString().split('T')[0];
+
+  const conn = await db.getConnection();
+  await conn.beginTransaction();
+  try {
+    const [particulars] = await conn.query(
+      'SELECT id, amount, paid_amount FROM receipt_particulars WHERE receipt_id = ? ORDER BY id', [id]
+    );
+    let leftToApply = claimedAmount;
+    for (const p of particulars) {
+      if (leftToApply <= 0) break;
+      const dueOnLine = Number(p.amount) - Number(p.paid_amount);
+      if (dueOnLine <= 0) continue;
+      const applyToLine = Math.min(dueOnLine, leftToApply);
+      await conn.query('UPDATE receipt_particulars SET paid_amount = paid_amount + ? WHERE id = ?', [applyToLine, p.id]);
+      leftToApply -= applyToLine;
+    }
+
+    const newPaid = Math.min(Number(receipt.paid_amount) + claimedAmount, Number(receipt.total_amount));
+    const newStatus = newPaid >= Number(receipt.total_amount) ? 'PAID' : 'PARTIAL';
+    await conn.query(
+      `UPDATE receipts SET receipt_state = 'APPROVED', status = ?, paid_amount = ?,
+       payment_mode = COALESCE(payment_mode, 'CASH'), payment_date = COALESCE(payment_date, ?),
+       pending_cash_amount = NULL WHERE id = ?`,
+      [newStatus, newPaid, today, id]
+    );
+    await conn.query(
+      'INSERT INTO transactions (store_id, type, reference_id, amount, payment_mode, status) VALUES (?, ?, ?, ?, ?, ?)',
+      [storeId, 'RECEIPT', id, claimedAmount, 'CASH', 'SUCCESS']
+    );
+    await conn.commit();
+    await audit.log({ storeId, userId, action: 'RECEIPT_CASH_REQUEST_APPROVED', entityType: 'RECEIPT', entityId: id,
+      details: { receipt_number: receipt.receipt_number, amount: claimedAmount } });
+    return getById(id, storeId);
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
+};
+
+const rejectCashRequest = async (id, storeId, userId, note) => {
+  const [[receipt]] = await db.query(
+    'SELECT * FROM receipts WHERE id = ? AND store_id = ?', [id, storeId]
+  );
+  if (!receipt) throw new Error('RECEIPT_NOT_FOUND');
+  if (receipt.receipt_state !== 'PENDING_APPROVAL' || receipt.pending_cash_amount === null) {
+    throw new Error('NO_PENDING_CASH_REQUEST');
+  }
+
+  await db.query(
+    "UPDATE receipts SET receipt_state = 'APPROVED', pending_cash_amount = NULL WHERE id = ?", [id]
+  );
+  await audit.log({ storeId, userId, action: 'RECEIPT_CASH_REQUEST_REJECTED', entityType: 'RECEIPT', entityId: id,
+    details: { receipt_number: receipt.receipt_number, claimed_amount: receipt.pending_cash_amount, note } });
+  return getById(id, storeId);
+};
+
+module.exports = { getAll, getById, create, approveReceipt, rejectReceipt, getPendingApprovals, getByDateRange, changeState, markPaid, collectRemaining, getApprovals, approveCashRequest, rejectCashRequest };

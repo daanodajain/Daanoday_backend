@@ -3,6 +3,7 @@ const db = require('../config/db');
 const bcrypt = require('bcryptjs');
 const { verifyToken } = require('../utils/jwt');
 const { success, error } = require('../utils/response');
+const { renderReceiptPdf } = require('../utils/receiptPdf');
 
 const generateOtp = () => Math.floor(100000 + Math.random() * 900000).toString();
 
@@ -61,8 +62,10 @@ router.post('/send-mobile-otp', async (req, res) => {
     const otp = generateOtp();
     await db.query('UPDATE customers SET otp_code = ?, otp_expires_at = ? WHERE id = ?',
       [otp, new Date(Date.now() + 5 * 60 * 1000), req.customer.id]);
-    // In prod: send SMS. For now return otp in response for dev.
-    success(res, { message: 'OTP sent', otp });
+    // SECURITY (S1): don't return the OTP — see customerAuthService.sendOtp
+    // for why. Logged server-side as a stopgap until a real SMS gateway is wired up.
+    console.log(`[OTP] customer ${req.customer.id} mobile-change to ${mobile}: ${otp} (expires in 5 min)`);
+    success(res, { message: 'OTP sent' });
   } catch (e) { error(res, e.message); }
 });
 
@@ -182,63 +185,42 @@ router.get('/store-expenses', async (req, res) => {
   } catch (e) { error(res, e.message); }
 });
 
-// POST /api/customer-profile/request-cash-payment  (customer requests cash payment → notify store admin)
-router.post('/request-cash-payment', async (req, res) => {
+// GET /api/customer-profile/receipts/:id/pdf — download own receipt.
+// (H5) The staff route GET /receipts/:id/pdf needs a staff JWT + x-store-id
+// header via storeContext middleware — a customer session has neither, so
+// that route 401/403s for a customer token. This is the customer-scoped
+// equivalent: ownership is checked directly against customer_id instead.
+router.get('/receipts/:id/pdf', async (req, res) => {
   try {
-    const { receiptId } = req.body;
     const [[receipt]] = await db.query(
-      `SELECT r.id, r.receipt_number, r.total_amount, r.paid_amount, r.status, r.store_id,
-              c.name as customer_name
+      `SELECT r.*, c.name as customer_name, c.mobile as customer_mobile,
+              csa.account_number, s.name as store_name, s.address as store_address,
+              s.contact as store_contact, s.email as store_email
        FROM receipts r
        JOIN customers c ON c.id = r.customer_id
+       JOIN customer_store_access csa ON csa.customer_id = c.id AND csa.store_id = r.store_id
+       JOIN stores s ON s.id = r.store_id
        WHERE r.id = ? AND r.customer_id = ?`,
-      [receiptId, req.customer.id]
+      [req.params.id, req.customer.id]
     );
     if (!receipt) return error(res, 'RECEIPT_NOT_FOUND', 404);
-    if (receipt.status === 'PAID') return error(res, 'ALREADY_PAID', 400);
+    const [particulars] = await db.query('SELECT * FROM receipt_particulars WHERE receipt_id = ?', [receipt.id]);
+    receipt.particulars = particulars;
 
-    const dueAmount = Number(receipt.total_amount) - Number(receipt.paid_amount);
-
-    // Find store admin users to notify
-    const [admins] = await db.query(
-      `SELECT u.id FROM users u
-       JOIN user_roles ur ON ur.user_id = u.id
-       JOIN roles r ON r.id = ur.role_id
-       WHERE ur.store_id = ? AND r.name IN ('STORE_ADMIN','SUB_ADMIN') AND u.active = TRUE`,
-      [receipt.store_id]
+    const [[settings]] = await db.query(
+      'SELECT receipt_template, receipt_header_text FROM store_settings WHERE store_id = ?', [receipt.store_id]
     );
-
-    // Insert notification for each admin
-    for (const admin of admins) {
-      await db.query(
-        `INSERT INTO notifications (user_id, store_id, type, message, reference_id, reference_type)
-         VALUES (?, ?, 'PAYMENT_RECEIVED', ?, ?, 'RECEIPT')`,
-        [
-          admin.id,
-          receipt.store_id,
-          `Cash payment request from ${receipt.customer_name} for receipt ${receipt.receipt_number} — ₹${dueAmount}`,
-          receipt.id,
-        ]
-      );
-    }
-
-    success(res, { message: 'Cash payment request sent to store admin', dueAmount });
-  } catch (e) { error(res, e.message); }
+    renderReceiptPdf(receipt, settings || {}, res);
+  } catch (e) {
+    if (res.headersSent) res.end();
+    else error(res, e.message);
+  }
 });
 
-// DELETE /api/customer-profile/cancel-cash-request/:receiptId  (customer cancels their own cash request)
-router.delete('/cancel-cash-request/:receiptId', async (req, res) => {
-  try {
-    const { receiptId } = req.params;
-    // Remove pending cash payment notifications for this receipt from this customer
-    await db.query(
-      `DELETE FROM notifications
-       WHERE reference_id = ? AND reference_type = 'RECEIPT' AND type = 'PAYMENT_RECEIVED'
-         AND message LIKE '%cash payment request%'`,
-      [receiptId]
-    );
-    success(res, { message: 'Cash payment request cancelled' });
-  } catch (e) { error(res, e.message); }
-});
+// NOTE: cash-payment request/cancel used to live here (notification-only,
+// never touched receipt_state). That's superseded by
+// POST/DELETE /api/customer-payments/request-cash-payment, which actually
+// puts the receipt into PENDING_APPROVAL so a staff/admin approval is
+// required before it's treated as paid — see customerPaymentRoutes.js.
 
 module.exports = router;

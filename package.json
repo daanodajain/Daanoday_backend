@@ -19,9 +19,7 @@
     "xlsx": "^0.18.5",
     "pdfkit": "^0.15.0",
     "razorpay": "^2.9.1",
-    "express-rate-limit": "^7.1.5",
-    "csurf": "^1.11.0",
-    "cookie-parser": "^1.4.6"
+    "express-rate-limit": "^7.1.5"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
