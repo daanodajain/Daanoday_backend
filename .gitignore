@@ -3,3 +3,5 @@ node_modules/
 *.log
 dist/
 nodejs/src/
+uploads/avatars/*
+!uploads/avatars/.gitkeep

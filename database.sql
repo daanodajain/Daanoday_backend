@@ -64,7 +64,10 @@ CREATE TABLE users (
   first_login            BOOLEAN DEFAULT TRUE,
   failed_login_attempts  INT DEFAULT 0,
   account_locked_until   TIMESTAMP NULL,
-  linked_customer_id     BIGINT NULL,
+  linked_customer_id     BIGINT NULL,   -- FK added after customers table
+  avatar_url             VARCHAR(500) NULL,
+  pending_mobile         VARCHAR(15) NULL,
+  pending_email          VARCHAR(255) NULL,
   active                 BOOLEAN DEFAULT TRUE,
   created_at             TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_users_mobile (mobile),
@@ -83,6 +86,9 @@ CREATE TABLE customers (
   first_login   BOOLEAN DEFAULT TRUE,
   otp_code      VARCHAR(6),
   otp_expires_at TIMESTAMP NULL,
+  avatar_url    VARCHAR(500) NULL,
+  pending_mobile VARCHAR(15) NULL,
+  pending_email  VARCHAR(255) NULL,
   created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uniq_mobile (mobile),
   UNIQUE KEY uniq_customer_email (email)

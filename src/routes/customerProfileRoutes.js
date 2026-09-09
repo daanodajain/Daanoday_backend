@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const { verifyToken } = require('../utils/jwt');
 const { success, error } = require('../utils/response');
 const { renderReceiptPdf } = require('../utils/receiptPdf');
+const { avatarUpload } = require('../config/avatarUpload');
 
 const generateOtp = () => Math.floor(100000 + Math.random() * 900000).toString();
 
@@ -15,7 +16,7 @@ const customerAuth = async (req, res, next) => {
     const decoded = verifyToken(authHeader.split(' ')[1]);
     if (decoded.userType !== 'CUSTOMER') return error(res, 'FORBIDDEN', 403);
     const [[customer]] = await db.query(
-      'SELECT id, name, mobile, email, password_hash FROM customers WHERE id = ?',
+      'SELECT id, name, mobile, email, password_hash, avatar_url FROM customers WHERE id = ?',
       [decoded.userId]
     );
     if (!customer) return error(res, 'CUSTOMER_NOT_FOUND', 401);
@@ -47,7 +48,7 @@ router.put('/', async (req, res) => {
     const { name } = req.body;
     if (!name?.trim()) return error(res, 'NAME_REQUIRED', 400);
     await db.query('UPDATE customers SET name = ? WHERE id = ?', [name.trim(), req.customer.id]);
-    const [[updated]] = await db.query('SELECT id, name, mobile, email FROM customers WHERE id = ?', [req.customer.id]);
+    const [[updated]] = await db.query('SELECT id, name, mobile, email, avatar_url FROM customers WHERE id = ?', [req.customer.id]);
     success(res, updated);
   } catch (e) { error(res, e.message); }
 });
@@ -81,6 +82,49 @@ router.post('/verify-mobile-otp', async (req, res) => {
     await db.query('UPDATE customers SET mobile = ?, otp_code = NULL, otp_expires_at = NULL WHERE id = ?',
       [mobile, req.customer.id]);
     success(res, { message: 'Mobile updated successfully' });
+  } catch (e) { error(res, e.message); }
+});
+
+// POST /api/customer-profile/avatar (multipart/form-data, field name "avatar")
+router.post('/avatar', (req, res) => {
+  avatarUpload.single('avatar')(req, res, async (err) => {
+    if (err) return error(res, err.message === 'INVALID_FILE_TYPE' ? 'INVALID_FILE_TYPE' : 'UPLOAD_FAILED', 400);
+    if (!req.file) return error(res, 'NO_FILE_UPLOADED', 400);
+    try {
+      const avatarUrl = `/uploads/avatars/${req.file.filename}`;
+      await db.query('UPDATE customers SET avatar_url = ? WHERE id = ?', [avatarUrl, req.customer.id]);
+      success(res, { avatarUrl });
+    } catch (e) { error(res, e.message); }
+  });
+});
+
+// POST /api/customer-profile/send-email-otp  (send OTP to new email — mirrors send-mobile-otp)
+router.post('/send-email-otp', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return error(res, 'INVALID_EMAIL', 400);
+    const [[existing]] = await db.query('SELECT id FROM customers WHERE email = ? AND id != ?', [email, req.customer.id]);
+    if (existing) return error(res, 'EMAIL_ALREADY_REGISTERED', 400);
+    const otp = generateOtp();
+    await db.query('UPDATE customers SET otp_code = ?, otp_expires_at = ? WHERE id = ?',
+      [otp, new Date(Date.now() + 5 * 60 * 1000), req.customer.id]);
+    console.log(`[OTP] customer ${req.customer.id} email-change to ${email}: ${otp} (expires in 5 min)`);
+    success(res, { message: 'OTP sent' });
+  } catch (e) { error(res, e.message); }
+});
+
+// POST /api/customer-profile/verify-email-otp  (verify OTP and update email)
+router.post('/verify-email-otp', async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+    const [[customer]] = await db.query(
+      'SELECT otp_code, otp_expires_at FROM customers WHERE id = ?', [req.customer.id]
+    );
+    if (!customer.otp_code || customer.otp_code !== otp || new Date(customer.otp_expires_at) < new Date())
+      return error(res, 'INVALID_OR_EXPIRED_OTP', 400);
+    await db.query('UPDATE customers SET email = ?, otp_code = NULL, otp_expires_at = NULL WHERE id = ?',
+      [email, req.customer.id]);
+    success(res, { message: 'Email updated successfully' });
   } catch (e) { error(res, e.message); }
 });
 

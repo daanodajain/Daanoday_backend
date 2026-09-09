@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
+const path = require('path');
 
 const app = express();
 
@@ -33,6 +34,9 @@ app.use(cors());
 // EVERY POST/PUT/DELETE — including login itself — failed with
 // EBADCSRFTOKEN. Removed rather than "fixed", since it was solving a
 // problem this auth model doesn't have.
+
+// Serve uploaded profile avatars (see src/config/avatarUpload.js)
+app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 // Never let a CDN/reverse-proxy cache API responses - this is a dynamic
 // API, every response must always reflect the current DB state.
