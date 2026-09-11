@@ -18,7 +18,7 @@ const login = async (req, res) => {
 };
 
 const getMyReceipts = async (req, res) => {
-  try { success(res, await svc.getMyReceipts(req.user.userId)); }
+  try { success(res, await svc.getMyReceipts(req.user.id)); }
   catch (e) { error(res, e.message, 400); }
 };
 

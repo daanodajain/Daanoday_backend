@@ -14,6 +14,7 @@ router.get('/export/receipts/tally', requirePermission('reports', 'export'), ctr
 router.get('/export/financial/excel', requirePermission('reports', 'export'), ctrl.exportFinancial);
 
 // Import endpoints
+router.get('/import/template/:type', requirePermission('reports', 'import'), ctrl.downloadImportTemplate);
 router.post('/import/customers', requirePermission('reports', 'import'), upload.single('file'), ctrl.importCustomers);
 
 module.exports = router;

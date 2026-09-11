@@ -136,7 +136,7 @@ const verifyPayment = async (storeId, paymentId, orderId, signature, receiptId) 
       }
 
       await conn.query(
-        'UPDATE receipts SET paid_amount = ?, status = ?, payment_mode = ? WHERE id = ?',
+        'UPDATE receipts SET paid_amount = ?, status = ?, payment_mode = ?, payment_date = COALESCE(payment_date, CURDATE()) WHERE id = ?',
         [newPaidAmount, newStatus, 'ONLINE', receiptId]
       );
 

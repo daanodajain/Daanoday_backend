@@ -60,4 +60,29 @@ const getYearlyComparison = async (req, res) => {
   catch (e) { error(res, e.message); }
 };
 
-module.exports = { getStats, getRevenue, getPaymentModes, getMonthly, getRecent, getPendingApprovals, getReceiptTypeDistribution, getCustomerGrowth, getDailyTrend, getYearlyComparison };
+const getFinancialSummary = async (req, res) => {
+  const { error: errRes, success: succRes } = require('../utils/response');
+  const db = require('../config/db');
+  try {
+    const { startDate, endDate } = req.query;
+    const conditions = ['store_id = ?', "receipt_state = 'APPROVED'"];
+    const params = [req.storeId];
+    if (startDate) { conditions.push('DATE(created_at) >= ?'); params.push(startDate); }
+    if (endDate)   { conditions.push('DATE(created_at) <= ?'); params.push(endDate); }
+    const where = conditions.join(' AND ');
+
+    const [[totals]] = await db.query(
+      `SELECT COALESCE(SUM(total_amount),0) as totalRevenue,
+              COALESCE(SUM(paid_amount),0)  as totalCollected,
+              COALESCE(SUM(total_amount - paid_amount),0) as totalDue,
+              COUNT(*) as totalReceipts,
+              SUM(status='PAID') as paidCount,
+              SUM(status='PARTIAL') as partialCount,
+              SUM(status='UNPAID') as unpaidCount
+       FROM receipts WHERE ${where}`, params
+    );
+    succRes(res, totals);
+  } catch (e) { errRes(res, e.message); }
+};
+
+module.exports = { getStats, getFinancialSummary, getRevenue, getPaymentModes, getMonthly, getRecent, getPendingApprovals, getReceiptTypeDistribution, getCustomerGrowth, getDailyTrend, getYearlyComparison };

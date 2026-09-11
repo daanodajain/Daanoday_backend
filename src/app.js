@@ -20,7 +20,14 @@ const otpLimiter = rateLimit({
 
 // Middleware
 app.use(express.json());
-app.use(cors());
+app.use(cors({
+  origin: process.env.CORS_ORIGINS
+    ? process.env.CORS_ORIGINS.split(',').map(o => o.trim())
+    : ['https://daanoday.com', 'https://www.daanoday.com', 'http://localhost:5173', 'http://localhost:3000'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Store-ID'],
+}));
 
 // NOTE on CSRF: this API is entirely stateless Bearer-JWT (Authorization
 // header), never cookie/session based — nothing here relies on the browser

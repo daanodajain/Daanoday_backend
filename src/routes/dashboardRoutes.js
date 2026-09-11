@@ -5,6 +5,7 @@ const { authenticate, storeContext } = require('../middleware/auth');
 router.use(authenticate, storeContext);
 
 router.get('/stats', ctrl.getStats);
+router.get('/financial-summary', ctrl.getFinancialSummary);
 router.get('/revenue', ctrl.getRevenue);
 router.get('/payment-modes', ctrl.getPaymentModes);
 router.get('/monthly', ctrl.getMonthly);

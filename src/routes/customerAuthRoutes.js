@@ -7,7 +7,7 @@ router.get('/config', ctrl.getConfig);
 router.post('/send-otp', ctrl.sendOtp);
 router.post('/login', ctrl.login);
 
-// Protected - customer views own receipts
-router.get('/my-receipts', authenticate, ctrl.getMyReceipts);
+// NOTE: /my-receipts was here but is now served by /api/customer-profile/receipts
+// which has ownership checked via customerAuth middleware. Dead route removed.
 
 module.exports = router;

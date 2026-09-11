@@ -2,7 +2,7 @@ const svc = require('../services/challanService');
 const { success, error } = require('../utils/response');
 
 const getAll = async (req, res) => {
-  try { success(res, await svc.getAll(req.storeId)); }
+  try { success(res, await svc.getAll(req.storeId, req.query)); }
   catch (e) { error(res, e.message); }
 };
 

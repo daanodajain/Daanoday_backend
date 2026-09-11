@@ -26,15 +26,27 @@ const _checkLockPeriod = async (storeId) => {
     throw new Error(`PERIOD_LOCKED: Records locked before ${s.locked_before_date}`);
 };
 
-const getAll = async (storeId) => {
+const getAll = async (storeId, filters = {}) => {
+  const { search, status, startDate, endDate } = filters;
+  const conditions = ['ch.store_id = ?'];
+  const params = [storeId];
+
+  if (search) {
+    conditions.push('(ch.challan_number LIKE ? OR s.name LIKE ?)');
+    params.push(`%${search}%`, `%${search}%`);
+  }
+  if (status) { conditions.push('ch.status = ?'); params.push(status); }
+  if (startDate) { conditions.push('DATE(ch.created_at) >= ?'); params.push(startDate); }
+  if (endDate) { conditions.push('DATE(ch.created_at) <= ?'); params.push(endDate); }
+
   const [rows] = await db.query(
     `SELECT ch.*, s.name as supplier_name, s.mobile as supplier_mobile, u.name as created_by_name
      FROM challans ch
      JOIN suppliers s ON s.id = ch.supplier_id
      JOIN users u ON u.id = ch.created_by
-     WHERE ch.store_id = ?
+     WHERE ${conditions.join(' AND ')}
      ORDER BY ch.created_at DESC`,
-    [storeId]
+    params
   );
   return rows;
 };

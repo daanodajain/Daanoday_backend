@@ -70,10 +70,36 @@ const exportFinancial = async (req, res) => {
   }
 };
 
+// GET /reports/import/template/:type  — downloads a blank XLSX template for the given import type
+const downloadImportTemplate = async (req, res) => {
+  try {
+    const XLSX = require('xlsx');
+    const type = req.params.type;
+
+    const templates = {
+      customers: [['name', 'mobile', 'email', 'address']],
+      receipts:  [['customer_mobile', 'amount', 'payment_mode', 'particular', 'remarks']],
+    };
+
+    const headers = templates[type];
+    if (!headers) return error(res, 'UNKNOWN_TEMPLATE_TYPE', 400);
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(headers);
+    XLSX.utils.book_append_sheet(wb, ws, 'Template');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${type}-import-template.xlsx"`);
+    res.send(buffer);
+  } catch (e) { error(res, e.message); }
+};
+
 module.exports = {
   exportCustomers,
   importCustomers,
   exportReceiptsExcel,
   exportReceiptsTally,
   exportFinancial,
+  downloadImportTemplate,
 };

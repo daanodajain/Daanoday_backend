@@ -1,29 +1,12 @@
 const router = require('express').Router();
 const db = require('../config/db');
 const bcrypt = require('bcryptjs');
-const { verifyToken } = require('../utils/jwt');
 const { success, error } = require('../utils/response');
 const { renderReceiptPdf } = require('../utils/receiptPdf');
 const { avatarUpload } = require('../config/avatarUpload');
+const { customerAuth } = require('../middleware/customerAuth');
 
 const generateOtp = () => Math.floor(100000 + Math.random() * 900000).toString();
-
-// Customer authenticate middleware
-const customerAuth = async (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith('Bearer ')) return error(res, 'UNAUTHORIZED', 401);
-  try {
-    const decoded = verifyToken(authHeader.split(' ')[1]);
-    if (decoded.userType !== 'CUSTOMER') return error(res, 'FORBIDDEN', 403);
-    const [[customer]] = await db.query(
-      'SELECT id, name, mobile, email, password_hash, avatar_url FROM customers WHERE id = ?',
-      [decoded.userId]
-    );
-    if (!customer) return error(res, 'CUSTOMER_NOT_FOUND', 401);
-    req.customer = customer;
-    next();
-  } catch { return error(res, 'INVALID_TOKEN', 401); }
-};
 
 router.use(customerAuth);
 
